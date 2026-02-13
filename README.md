@@ -63,7 +63,7 @@ A single Rust binary — **36 specialized crates** — that runs a full security
 | **Static** | Parses Rust into full ASTs via the `syn` crate. Runs 52 pattern-matching detectors with context gating (e.g., overflow detection only fires on financial values, not loop counters). Inter-procedural taint analysis on `AccountInfo` flows via `petgraph` call graphs. | `program-analyzer`, `anchor-security-analyzer`, `sec3-analyzer`, `taint-analyzer`, `cpi-analyzer`, `dataflow-analyzer` |
 | **Formal** | Encodes arithmetic invariants, balance conservation, and access control as Z3 SMT constraints. Checks satisfiability to generate mathematical proofs of exploitability or safety. | `symbolic-engine`, `certora-prover`, `kani-verifier`, `concolic-executor` |
 | **Dynamic** | Stateful fuzzing of Anchor programs (Trident), binary-level SBF bytecode fuzzing (FuzzDelSol), and concolic path exploration (WACANA). | `trident-fuzzer`, `fuzzdelsol`, `wacana-analyzer`, `security-fuzzer` |
-| **AI** | Feeds findings through LLM APIs (OpenRouter/OpenAI/NVIDIA) with Solana-specific prompts grounded in Sealevel runtime internals. Multi-LLM consensus voting reduces false positives. Generates executable PoC code and fix suggestions. | `ai-enhancer`, `llm-strategist`, `consensus-engine`, `l3x-analyzer` |
+| **AI** | Feeds findings through LLM APIs (NVIDIA NIM / OpenRouter / OpenAI) with Solana-specific prompts grounded in Sealevel runtime internals. Features deep integration with **Kimi 2.5** (NVIDIA NIM) for high-reasoning exploit synthesis. Multi-LLM consensus voting reduces false positives. Generates executable PoC code and fix suggestions. | `ai-enhancer`, `llm-strategist`, `consensus-engine`, `l3x-analyzer` |
 
 ---
 
@@ -73,7 +73,7 @@ A single Rust binary — **36 specialized crates** — that runs a full security
 
 ### On-Chain Exploit Registry (Devnet)
 
-**Program ID:** `HG1LKfUipjq5d1WdXLpxNqtv2ZbgFHqJZvvmFZoXNhbz`
+**Program ID:** `4cb3bZbBbXUxX6Ky4FFsEZEUBPe4TaRhvBEyuV9En6Zq`
 
 A custom **Anchor 0.30.1** program deployed to **Solana devnet** that stores audit findings as immutable PDA records.
 
