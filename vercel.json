@@ -1,6 +1,5 @@
 {
     "version": 2,
-    "public": false,
     "cleanUrls": true,
     "rewrites": [
         {
@@ -46,14 +45,6 @@
         {
             "source": "/api/hello",
             "destination": "/api/hello.js"
-        },
-        {
-            "source": "/",
-            "destination": "/dashboard/index.html"
-        },
-        {
-            "source": "/index.html",
-            "destination": "/dashboard/index.html"
         }
     ]
 }

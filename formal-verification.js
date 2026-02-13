@@ -9,15 +9,9 @@ module.exports = (req, res) => {
     }
 
     res.status(200).json({
-        total_properties: 42,
-        verified: 38,
-        failed: 4,
-        undetermined: 0,
-        engine: 'Z3 + Kani + Certora',
         properties: [
             {
                 category: 'Access Control',
-                name: 'VLT-AC-01',
                 status: 'verified',
                 verification_time_ms: 124,
                 description: 'Verify that only the owner can withdraw funds',
@@ -25,7 +19,6 @@ module.exports = (req, res) => {
             },
             {
                 category: 'Account Validation',
-                name: 'VLT-AV-05',
                 status: 'verified',
                 verification_time_ms: 890,
                 description: 'Check owner check on vault account',
@@ -33,7 +26,6 @@ module.exports = (req, res) => {
             },
             {
                 category: 'Arithmetic Safety',
-                name: 'VLT-AR-02',
                 status: 'failed',
                 verification_time_ms: 2100,
                 description: 'Check for potential overflow in fee calculation',

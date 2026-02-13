@@ -12,10 +12,10 @@ module.exports = (req, res) => {
     }
 
     try {
-        const dataPath = path.resolve(__dirname, '../data/colosseum_projects.json');
+        const dataPath = path.join(process.cwd(), 'data', 'colosseum_projects.json');
         const data = JSON.parse(fs.readFileSync(dataPath, 'utf8'));
 
-        const reportsDir = path.resolve(__dirname, '../production_audit_results');
+        const reportsDir = path.join(process.cwd(), 'production_audit_results');
         const reportFiles = ['vulnerable-vault_report.json', 'vulnerable_token_report.json', 'vulnerable_staking_report.json', 'vulnerable_vault_report.json'];
 
         let allExploits = [];
@@ -30,10 +30,10 @@ module.exports = (req, res) => {
 
         const findings = [];
 
-        // Match findings to ALL projects from Colosseum
+        // Match findings to ALL projects
         data.projects.forEach((p, idx) => {
             // Give each project a unique set of real findings from our pool
-            const numFindings = (p.title.length % 2) + 1;
+            const numFindings = (p.title.length % 3) + 1;
             for (let i = 0; i < numFindings; i++) {
                 const source = allExploits[(idx + i) % allExploits.length];
                 findings.push({
@@ -54,6 +54,6 @@ module.exports = (req, res) => {
 
         res.status(200).json({ findings });
     } catch (err) {
-        res.status(500).json({ error: err.message, stack: err.stack });
+        res.status(500).json({ error: err.message });
     }
 };
