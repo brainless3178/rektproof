@@ -87,13 +87,12 @@ pub struct AIEnhancerConfig {
 impl Default for AIEnhancerConfig {
     fn default() -> Self {
         Self {
-            model: "anthropic/claude-3.5-sonnet".to_string(),
+            model: "moonshotai/kimi-k2.5".to_string(),
             max_retries: 3,
             retry_delay_ms: 1000,
-            concurrency_limit: 1, // low for rate-limited models
-            temperature: 0.3,
-
-            max_tokens: 4096,
+            concurrency_limit: 1,
+            temperature: 1.0,
+            max_tokens: 16384,
         }
     }
 }
@@ -229,9 +228,15 @@ CRITICAL: Output ONLY the raw JSON object. No ```json fencing. No preamble. No e
             && (self.api_key.starts_with("sk-proj-")
                 || (self.api_key.starts_with("sk-") && !self.api_key.starts_with("sk-or-")));
 
-        // nemotron needs special config
+        // Kimi 2.5 / NVIDIA NIM specific config
         let (max_tokens, reasoning_budget, chat_template_kwargs) =
-            if is_nvidia && self.config.model.contains("nemotron") {
+            if self.config.model.contains("kimi") || self.config.model.contains("moonshot") {
+                (
+                    Some(self.config.max_tokens),
+                    None,
+                    Some(serde_json::json!({"thinking": true})),
+                )
+            } else if is_nvidia && self.config.model.contains("nemotron") {
                 (
                     Some(16384),
                     Some(16384),
@@ -265,7 +270,7 @@ CRITICAL: Output ONLY the raw JSON object. No ```json fencing. No preamble. No e
 
         let api_url = if let Ok(custom_url) = std::env::var("LLM_BASE_URL") {
             custom_url
-        } else if is_nvidia {
+        } else if is_nvidia || self.config.model.contains("kimi") {
             "https://integrate.api.nvidia.com/v1/chat/completions".to_string()
         } else if is_openai {
             "https://api.openai.com/v1/chat/completions".to_string()
