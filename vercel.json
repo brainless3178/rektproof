@@ -3,6 +3,14 @@
     "cleanUrls": true,
     "rewrites": [
         {
+            "source": "/",
+            "destination": "/dashboard/index.html"
+        },
+        {
+            "source": "/dashboard",
+            "destination": "/dashboard/index.html"
+        },
+        {
             "source": "/api/programs",
             "destination": "/api/programs.js"
         },
@@ -45,14 +53,6 @@
         {
             "source": "/api/hello",
             "destination": "/api/hello.js"
-        },
-        {
-            "source": "/",
-            "destination": "/dashboard/index.html"
-        },
-        {
-            "source": "/dashboard",
-            "destination": "/dashboard/index.html"
         }
     ]
 }
