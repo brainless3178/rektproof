@@ -22,8 +22,7 @@ usage() {
     echo "  Usage: $0 <target>"
     echo ""
     echo "  Targets:"
-    echo "    fly         Deploy to Fly.io (recommended, free tier)"
-    echo "    railway     Deploy to Railway (easy, $5/mo hobby)"
+    echo "    vercel      Deploy to Vercel (static frontend)"
     echo "    render      Deploy to Render (free tier available)"
     echo "    docker      Build Docker image locally"
     echo "    compose     Run with Docker Compose (local/VPS)"
@@ -36,29 +35,11 @@ usage() {
 
 case "$1" in
 
-  fly)
-    info "Deploying to Fly.io..."
-    command -v flyctl >/dev/null 2>&1 || err "Install flyctl first: curl -L https://fly.io/install.sh | sh"
-    
-    if ! flyctl apps list 2>/dev/null | grep -q "solana-security-swarm"; then
-        info "Creating new Fly app..."
-        flyctl launch --copy-config --no-deploy --name solana-security-swarm
-    fi
-    
-    flyctl deploy --ha=false
-    ok "Deployed! Run 'flyctl open' to view your dashboard"
-    flyctl status
-    ;;
-
-  railway)
-    info "Deploying to Railway..."
-    command -v railway >/dev/null 2>&1 || err "Install Railway CLI: npm i -g @railway/cli"
-    
-    railway login 2>/dev/null || true
-    railway init 2>/dev/null || true
-    railway up --detach
-    ok "Deployed to Railway!"
-    railway open 2>/dev/null || info "Check your Railway dashboard for the URL"
+  vercel)
+    info "Deploying to Vercel..."
+    command -v vercel >/dev/null 2>&1 || err "Install Vercel CLI: npm i -g vercel"
+    vercel --prod
+    ok "Deployed to Vercel!"
     ;;
 
   render)

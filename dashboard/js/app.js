@@ -461,7 +461,7 @@
         html += '<div style="padding:100px 40px; text-align:center; border:2px dashed var(--border-subtle); border-radius:12px; margin-top:24px;">' +
           '<div style="font-size:3rem; margin-bottom:20px;">🔬</div>' +
           '<h3 style="color:var(--text-primary); margin-bottom:8px;">No Taint Data Available</h3>' +
-          '<p style="color:var(--text-muted); max-width:400px; margin:0 auto;">Connect to the Solana Security Swarm production API on Railway to view data flow and taint propagation analysis.</p>' +
+          '<p style="color:var(--text-muted); max-width:400px; margin:0 auto;">Connect to the Solana Security Swarm production API to view data flow and taint propagation analysis.</p>' +
           '</div>';
         pageEl.innerHTML = html;
         return;
@@ -519,7 +519,7 @@
       html += '<div style="padding:100px 40px; text-align:center; border:2px dashed var(--border-subtle); border-radius:12px; margin-top:24px;">' +
         '<div style="font-size:3rem; margin-bottom:20px;">🛡️</div>' +
         '<h3 style="color:var(--text-primary); margin-bottom:8px;">No Dataflow Information</h3>' +
-        '<p style="color:var(--text-muted); max-width:400px; margin:0 auto;">Use-definition chains and dead code analysis require a live production core. Connect to Railway to analyze program dataflow.</p>' +
+        '<p style="color:var(--text-muted); max-width:400px; margin:0 auto;">Use-definition chains and dead code analysis require a live production core. Connect to the backend to analyze program dataflow.</p>' +
         '</div>';
       pageEl.innerHTML = html;
       return;
@@ -2337,7 +2337,7 @@
       });
     }).catch(function (err) {
       console.log('[Security Swarm] API Connection Failed: ' + err.message);
-      showToast('API Connection Failed: Ensure Railway backend is reachable.', 'error');
+      showToast('API Connection Failed: Ensure the backend engine is reachable.', 'error');
 
       /* Insert Error State into UI */
       var pageEl = document.getElementById('page-content');
@@ -2345,7 +2345,7 @@
         pageEl.innerHTML = '<div style="padding:100px 40px; text-align:center;">' +
           '<div style="font-size:3rem; margin-bottom:20px;">📡</div>' +
           '<h2 style="color:var(--critical); margin-bottom:10px;">Backend Unreachable</h2>' +
-          '<p style="color:var(--text-muted); max-width:500px; margin:0 auto 20px;">The dashboard is running in production mode, but it cannot connect to the Solana Security Swarm engine on Railway.</p>' +
+          '<p style="color:var(--text-muted); max-width:500px; margin:0 auto 20px;">The dashboard is running in production mode, but it cannot connect to the Solana Security Swarm engine.</p>' +
           '<div style="background:var(--bg-card); padding:15px; border-radius:8px; display:inline-block; border:1px solid var(--border-subtle);">' +
           '<code style="font-size:0.8rem; color:var(--text-secondary);">Error: ' + C.esc(err.message) + '</code>' +
           '</div>' +
