@@ -16,55 +16,8 @@
     });
   }
 
-  /* ── Mock Data (fallback when API unavailable) ── */
-  var PROGRAMS = [
-    {
-      name: 'vulnerable-vault',
-      program_id: '47poGhMsyLFMLkCFuVx1DiEwTRGqbiKNFmDKvFco3RkD',
-      total_exploits: 9, critical_count: 2, high_count: 2, medium_count: 5, low_count: 0,
-      security_score: 35, timestamp: '2025-07-10T14:54:32Z',
-      exploits: [
-        { id: 'VULN-V01', category: 'DeFi Logic', vulnerability_type: 'Oracle Manipulation', severity: 5, severity_label: 'CRITICAL', instruction: 'get_price', description: 'Price oracle can be manipulated via flash loan to return incorrect asset prices.', attack_scenario: 'Attacker takes flash loan, manipulates oracle price, executes swap at favorable rate, repays loan.', secure_fix: 'Use TWAP oracle with minimum observation window of 30 minutes.', economic_impact: 'Critical: Up to $50M TVL at risk.' },
-        { id: 'VULN-V02', category: 'DeFi Logic', vulnerability_type: 'Flash Loan Attack Vector', severity: 5, severity_label: 'CRITICAL', instruction: 'swap', description: 'No flash loan guard allows single-transaction price manipulation and arbitrage.', attack_scenario: 'Attacker borrows large amount, manipulates pool, profits from price difference.', secure_fix: 'Implement flash loan detection with same-slot checks.', economic_impact: 'Critical: Complete pool drainage possible.' },
-        { id: 'VULN-V03', category: 'Auth & Auth', vulnerability_type: 'Missing Access Control', severity: 4, severity_label: 'HIGH', instruction: 'withdraw', description: 'Withdraw instruction lacks proper authority verification.', attack_scenario: 'Any signer can call withdraw and drain vault funds.', secure_fix: 'Add has_one = authority constraint on vault account.', economic_impact: 'High: Complete fund loss.' },
-        { id: 'VULN-V04', category: 'Auth & Auth', vulnerability_type: 'Initialization Frontrunning', severity: 4, severity_label: 'HIGH', instruction: 'initialize', description: 'Initialize can be frontrun to claim authority.', attack_scenario: 'Attacker monitors mempool, frontruns initialize with own authority.', secure_fix: 'Use constant seeds for singleton state PDA.', economic_impact: 'High: Complete protocol takeover.' },
-        { id: 'VULN-V05', category: 'Arithmetic', vulnerability_type: 'Integer Overflow in Fee Calc', severity: 3, severity_label: 'MEDIUM', instruction: 'calculate_fee', description: 'Fee calculation uses unchecked multiplication that can overflow.', attack_scenario: 'Large deposit amounts cause fee to wrap to near-zero.', secure_fix: 'Use checked_mul and checked_div for all fee math.', economic_impact: 'Medium: Fee bypass on large transactions.' },
-        { id: 'VULN-V06', category: 'DeFi Logic', vulnerability_type: 'Constant Product Violation', severity: 3, severity_label: 'MEDIUM', instruction: 'swap', description: 'Swap does not enforce k=xy invariant post-execution.', attack_scenario: 'Repeated unbalanced swaps drain specific reserves.', secure_fix: 'Enforce post-swap balance check against invariant.', economic_impact: 'Medium: Gradual reserve extraction.' },
-        { id: 'VULN-V07', category: 'Account Validation', vulnerability_type: 'Missing Owner Check', severity: 3, severity_label: 'MEDIUM', instruction: 'deposit', description: 'Deposit does not verify token account ownership.', attack_scenario: 'Attacker passes foreign token account to credit deposit.', secure_fix: 'Add owner = token_program constraint.', economic_impact: 'Medium: Phantom deposit credit.' },
-        { id: 'VULN-V08', category: 'Account Validation', vulnerability_type: 'Type Cosplay', severity: 3, severity_label: 'MEDIUM', instruction: 'process', description: 'Account discriminator not verified allowing type confusion.', attack_scenario: 'Attacker passes account of different type with matching layout.', secure_fix: 'Use Anchor account discriminator checks.', economic_impact: 'Medium: Unauthorized state mutation.' },
-        { id: 'VULN-V09', category: 'Arithmetic', vulnerability_type: 'Rounding Error Accumulation', severity: 3, severity_label: 'MEDIUM', instruction: 'distribute_rewards', description: 'Reward distribution truncates remainders each epoch.', attack_scenario: 'Over many epochs, truncation errors accumulate to material loss.', secure_fix: 'Track remainder and distribute in subsequent epoch.', economic_impact: 'Medium: ~0.1% reward leakage per epoch.' }
-      ]
-    },
-    {
-      name: 'vulnerable-token',
-      program_id: 'BPFLoaderUpgradeab1e11111111111111111111111',
-      total_exploits: 7, critical_count: 1, high_count: 2, medium_count: 4, low_count: 0,
-      security_score: 48, timestamp: '2025-07-10T15:12:00Z',
-      exploits: [
-        { id: 'VULN-T01', category: 'Auth & Auth', vulnerability_type: 'Unauthorized Mint', severity: 5, severity_label: 'CRITICAL', instruction: 'mint_to', description: 'Mint authority not validated, allowing unlimited token minting.', attack_scenario: 'Attacker calls mint_to with arbitrary amount, inflating supply.', secure_fix: 'Validate mint_authority signer matches expected PDA.', economic_impact: 'Critical: Infinite token inflation, total value collapse.' },
-        { id: 'VULN-T02', category: 'Auth & Auth', vulnerability_type: 'Missing Freeze Check', severity: 4, severity_label: 'HIGH', instruction: 'transfer', description: 'Transfer does not check if account is frozen.', attack_scenario: 'Frozen accounts can still transfer tokens.', secure_fix: 'Check account.is_frozen before allowing transfer.', economic_impact: 'High: Compliance and security bypass.' },
-        { id: 'VULN-T03', category: 'Account Validation', vulnerability_type: 'PDA Seed Collision', severity: 4, severity_label: 'HIGH', instruction: 'create_account', description: 'PDA derivation uses predictable seeds without bump canonicalization.', attack_scenario: 'Attacker finds alternate bump to derive same PDA.', secure_fix: 'Always use find_program_address canonical bump.', economic_impact: 'High: Account hijacking possible.' },
-        { id: 'VULN-T04', category: 'Arithmetic', vulnerability_type: 'Decimal Precision Loss', severity: 3, severity_label: 'MEDIUM', instruction: 'convert', description: 'Token decimal conversion loses precision for small amounts.', attack_scenario: 'Dust amounts round to zero, allowing free micro-transactions.', secure_fix: 'Use u128 for intermediate calculations.', economic_impact: 'Medium: Accumulated precision loss.' },
-        { id: 'VULN-T05', category: 'DeFi Logic', vulnerability_type: 'Reentrancy via CPI', severity: 3, severity_label: 'MEDIUM', instruction: 'swap_tokens', description: 'CPI callback allows re-entering swap before state update.', attack_scenario: 'Attacker contract re-enters swap during CPI to drain pool.', secure_fix: 'Follow CEI pattern: checks, effects, then interactions.', economic_impact: 'Medium: Partial pool drainage.' },
-        { id: 'VULN-T06', category: 'Account Validation', vulnerability_type: 'Closing Account Drain', severity: 3, severity_label: 'MEDIUM', instruction: 'close_account', description: 'Account closing does not zero data before lamport transfer.', attack_scenario: 'Attacker can revive closed account in same transaction.', secure_fix: 'Zero account data and use close constraint.', economic_impact: 'Medium: Account revival attack.' },
-        { id: 'VULN-T07', category: 'Arithmetic', vulnerability_type: 'Slippage Bypass', severity: 3, severity_label: 'MEDIUM', instruction: 'swap_tokens', description: 'Slippage tolerance check uses wrong comparison operator.', attack_scenario: 'User receives significantly less than expected.', secure_fix: 'Use >= for minimum output check.', economic_impact: 'Medium: User fund loss per trade.' }
-      ]
-    },
-    {
-      name: 'vulnerable-staking',
-      program_id: 'Stake11111111111111111111111111111111111111',
-      total_exploits: 6, critical_count: 1, high_count: 1, medium_count: 3, low_count: 1,
-      security_score: 55, timestamp: '2025-07-10T15:30:00Z',
-      exploits: [
-        { id: 'VULN-S01', category: 'DeFi Logic', vulnerability_type: 'Reward Manipulation', severity: 5, severity_label: 'CRITICAL', instruction: 'claim_rewards', description: 'Reward calculation uses stale timestamp allowing double claims.', attack_scenario: 'Attacker stakes, claims, unstakes, restakes in same slot to multiply rewards.', secure_fix: 'Use slot-based tracking with per-epoch snapshots.', economic_impact: 'Critical: Unlimited reward extraction.' },
-        { id: 'VULN-S02', category: 'Auth & Auth', vulnerability_type: 'Stake Authority Bypass', severity: 4, severity_label: 'HIGH', instruction: 'unstake', description: 'Unstake does not verify the original staker authority.', attack_scenario: 'Anyone can unstake and redirect funds to their account.', secure_fix: 'Add has_one = staker constraint on stake account.', economic_impact: 'High: Theft of staked funds.' },
-        { id: 'VULN-S03', category: 'Arithmetic', vulnerability_type: 'APY Calculation Overflow', severity: 3, severity_label: 'MEDIUM', instruction: 'calculate_apy', description: 'APY compound calculation overflows for long stake durations.', attack_scenario: 'Very long stakes produce astronomically wrong reward amounts.', secure_fix: 'Cap maximum stake duration and use saturating math.', economic_impact: 'Medium: Incorrect reward payouts.' },
-        { id: 'VULN-S04', category: 'Account Validation', vulnerability_type: 'Duplicate Mutable Account', severity: 3, severity_label: 'MEDIUM', instruction: 'transfer_stake', description: 'Same account can be passed as both source and destination.', attack_scenario: 'Attacker doubles balance by self-transfer.', secure_fix: 'Verify source != destination account keys.', economic_impact: 'Medium: Balance duplication.' },
-        { id: 'VULN-S05', category: 'DeFi Logic', vulnerability_type: 'Cooldown Bypass', severity: 3, severity_label: 'MEDIUM', instruction: 'unstake', description: 'Unstake cooldown period can be bypassed via PDA manipulation.', attack_scenario: 'Attacker creates new stake PDA to bypass cooldown.', secure_fix: 'Track cooldown per user, not per stake account.', economic_impact: 'Medium: Early withdrawal without penalty.' },
-        { id: 'VULN-S06', category: 'Account Validation', vulnerability_type: 'Missing Sysvar Check', severity: 2, severity_label: 'LOW', instruction: 'stake', description: 'Clock sysvar not validated, could be spoofed account.', attack_scenario: 'Attacker passes fake clock account with manipulated timestamp.', secure_fix: 'Verify sysvar address matches known Clock sysvar ID.', economic_impact: 'Low: Time-dependent logic manipulation.' }
-      ]
-    }
-  ];
+  /* ── Production Data Mode (Mock Fallback Disabled) ── */
+  var PROGRAMS = [];
 
   /* Normalize exploits with program references */
   var ALL_FINDINGS = [];
@@ -2471,10 +2424,25 @@
         });
 
         API_LOADED = true;
-        showToast('Connected to API — loaded ' + PROGRAMS.length + ' programs, ' + ALL_FINDINGS.length + ' findings', 'success');
+        showToast('Connected to Production API — loaded ' + ALL_FINDINGS.length + ' genuine findings', 'success');
       });
     }).catch(function (err) {
-      console.log('[Security Swarm] API not available (' + err.message + '), using mock data');
+      console.log('[Security Swarm] API Connection Failed: ' + err.message);
+      showToast('API Connection Failed: Ensure Railway backend is reachable.', 'error');
+
+      /* Insert Error State into UI */
+      var pageEl = document.getElementById('page-content');
+      if (pageEl) {
+        pageEl.innerHTML = '<div style="padding:100px 40px; text-align:center;">' +
+          '<div style="font-size:3rem; margin-bottom:20px;">📡</div>' +
+          '<h2 style="color:var(--critical); margin-bottom:10px;">Backend Unreachable</h2>' +
+          '<p style="color:var(--text-muted); max-width:500px; margin:0 auto 20px;">The dashboard is running in production mode, but it cannot connect to the Solana Security Swarm engine on Railway.</p>' +
+          '<div style="background:var(--bg-card); padding:15px; border-radius:8px; display:inline-block; border:1px solid var(--border-subtle);">' +
+          '<code style="font-size:0.8rem; color:var(--text-secondary);">Error: ' + C.esc(err.message) + '</code>' +
+          '</div>' +
+          '<div style="margin-top:30px;"><button class="btn btn--primary" onclick="window.location.reload()">Retry Connection</button></div>' +
+          '</div>';
+      }
     });
   }
 
