@@ -1,4 +1,4 @@
-const NVIDIA_API_KEY = "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";
+const NVIDIA_API_KEY = process.env.NVIDIA_API_KEY || "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";
 
 module.exports = async (req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
