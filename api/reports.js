@@ -12,39 +12,50 @@ module.exports = (req, res) => {
         return;
     }
 
+    function computeScore(report) {
+        if (report.security_score != null) return report.security_score;
+        var c = report.critical_count || 0;
+        var h = report.high_count || 0;
+        var m = report.medium_count || 0;
+        return Math.max(0, 100 - (c * 5) - (h * 2) - (m * 1));
+    }
+
     var reports = [
         {
             id: 'REP-VAULT',
-            name: 'vulnerable-vault audit report',
+            filename: 'vulnerable-vault_report.json',
             program_id: vaultReport.program_id,
-            date: vaultReport.timestamp || '2026-02-13',
+            timestamp: vaultReport.timestamp || '2026-02-13T00:00:00Z',
             type: 'Full Audit',
-            total_findings: vaultReport.total_exploits,
-            critical: vaultReport.critical_count,
-            high: vaultReport.high_count,
-            medium: vaultReport.medium_count
+            total_exploits: vaultReport.total_exploits,
+            critical_count: vaultReport.critical_count,
+            high_count: vaultReport.high_count,
+            medium_count: vaultReport.medium_count,
+            security_score: computeScore(vaultReport)
         },
         {
             id: 'REP-TOKEN',
-            name: 'vulnerable-token audit report',
+            filename: 'vulnerable-token_report.json',
             program_id: tokenReport.program_id,
-            date: tokenReport.timestamp || '2026-02-09',
+            timestamp: tokenReport.timestamp || '2026-02-09T14:54:32Z',
             type: 'Full Audit',
-            total_findings: tokenReport.total_exploits,
-            critical: tokenReport.critical_count,
-            high: tokenReport.high_count,
-            medium: tokenReport.medium_count
+            total_exploits: tokenReport.total_exploits,
+            critical_count: tokenReport.critical_count,
+            high_count: tokenReport.high_count,
+            medium_count: tokenReport.medium_count,
+            security_score: computeScore(tokenReport)
         },
         {
             id: 'REP-STAKING',
-            name: 'vulnerable-staking audit report',
+            filename: 'vulnerable-staking_report.json',
             program_id: stakingReport.program_id,
-            date: stakingReport.timestamp || '2026-02-09',
+            timestamp: stakingReport.timestamp || '2026-02-09T14:54:32Z',
             type: 'Full Audit',
-            total_findings: stakingReport.total_exploits,
-            critical: stakingReport.critical_count,
-            high: stakingReport.high_count,
-            medium: stakingReport.medium_count
+            total_exploits: stakingReport.total_exploits,
+            critical_count: stakingReport.critical_count,
+            high_count: stakingReport.high_count,
+            medium_count: stakingReport.medium_count,
+            security_score: computeScore(stakingReport)
         }
     ];
 

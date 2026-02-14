@@ -46,9 +46,27 @@ module.exports = (req, res) => {
 
     var deepTaint = (vaultReport.deep_analysis && vaultReport.deep_analysis.enhanced_taint) || {};
 
+    var allExploits = []
+        .concat((vaultReport.exploits || []).map(function (e) { return Object.assign({}, e, { _program: 'vulnerable-vault' }); }))
+        .concat((tokenReport.exploits || []).map(function (e) { return Object.assign({}, e, { _program: 'vulnerable-token' }); }))
+        .concat((stakingReport.exploits || []).map(function (e) { return Object.assign({}, e, { _program: 'vulnerable-staking' }); }));
+
+    var flows = allExploits.filter(function (e) { return e.severity >= 3; }).slice(0, 15).map(function (e, i) {
+        var sevMap = { 5: 'CRITICAL', 4: 'HIGH', 3: 'MEDIUM', 2: 'LOW', 1: 'LOW' };
+        return {
+            id: 'TAINT-' + String(i + 1).padStart(3, '0'),
+            source: e.instruction || 'user_input',
+            sink: (e._program || 'unknown') + '::' + (e.instruction || 'handler'),
+            severity: sevMap[e.severity] || 'MEDIUM',
+            taint_type: e.category || 'data_flow',
+            confidence: (e.confidence_score || 75) / 100
+        };
+    });
+
     res.status(200).json({
-        nodes,
-        edges,
+        nodes: nodes,
+        edges: edges,
+        flows: flows,
         total_sources: nodes.filter(function (n) { return n.type === 'source'; }).length,
         total_sinks: nodes.filter(function (n) { return n.type === 'sink'; }).length,
         total_flows: edges.length,

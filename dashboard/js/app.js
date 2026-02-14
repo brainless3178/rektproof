@@ -64,7 +64,7 @@
 
   function openModal(titleText, bodyHtml) {
     var overlay = document.getElementById('modal-overlay');
-    document.getElementById('modal-title').textContent = titleText;
+    document.getElementById('modal-title').innerHTML = titleText;
     document.getElementById('modal-body').innerHTML = bodyHtml;
     overlay.classList.add('is-visible');
     overlay.setAttribute('aria-hidden', 'false');
@@ -191,6 +191,7 @@
 
   /* ── Overview ── */
   function renderOverview() {
+    console.log('[Security Swarm] Rendering page: overview (' + ALL_FINDINGS.length + ' findings, ' + PROGRAMS.length + ' programs)');
     var sev = sumBySeverity(ALL_FINDINGS);
     var totalFindings = ALL_FINDINGS.length;
     var avgScore = Math.round(PROGRAMS.reduce(function (a, p) { return a + p.security_score; }, 0) / PROGRAMS.length);
@@ -227,6 +228,7 @@
 
   /* ── Programs ── */
   function renderPrograms() {
+    console.log('[Security Swarm] Rendering page: programs (' + PROGRAMS.length + ' programs)');
     var html = C.sectionHeader({ title: 'Program Analysis', subtitle: 'Security posture per audited program' });
     html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(380px,1fr));gap:24px;">';
 
@@ -271,6 +273,7 @@
 
   /* ── Findings ── */
   function renderFindings() {
+    console.log('[Security Swarm] Rendering page: findings (' + ALL_FINDINGS.length + ' total)');
     var html = C.sectionHeader({ title: 'All Findings', subtitle: totalFindings() + ' vulnerabilities across all programs' });
 
     html += '<div style="display:flex;gap:16px;align-items:flex-end;margin-bottom:24px;flex-wrap:wrap;">';
@@ -344,6 +347,7 @@
 
   /* ── Triage ── */
   function renderTriage() {
+    console.log('[Security Swarm] Rendering page: triage (' + ALL_FINDINGS.length + ' findings)');
     var html = C.sectionHeader({ title: 'Finding Triage', subtitle: 'Prioritize and classify findings for remediation' });
 
     var statuses = { open: 0, accepted: 0, dismissed: 0, investigating: 0 };
@@ -385,6 +389,7 @@
 
   /* ── Risk Matrix ── */
   function renderRiskMatrix() {
+    console.log('[Security Swarm] Rendering page: risk-matrix');
     var html = C.sectionHeader({ title: 'Risk Heatmap', subtitle: 'Severity vs. category vulnerability distribution' });
 
     var categories = ['DeFi Logic', 'Auth & Auth', 'Arithmetic', 'Account Validation'];
@@ -426,7 +431,9 @@
 
   /* ── Taint Analysis ── */
   function renderTaintAnalysis() {
+    console.log('[Security Swarm] Rendering page: taint-analysis (API_LOADED=' + API_LOADED + ')');
     function doRender(d) {
+      console.log('[Security Swarm] Taint analysis data:', d ? 'received (' + (d.nodes || []).length + ' nodes, ' + (d.edges || []).length + ' edges)' : 'none');
       var html;
       if (!d || !d.nodes) {
         html = C.sectionHeader({ title: 'Taint Analysis', subtitle: 'Data flow propagation and taint tracking visualization' });
@@ -477,7 +484,8 @@
         pageEl.innerHTML = html;
         return;
       }
-      Ch.flowGraph(document.getElementById('taint-flow'), graphNodes, graphEdges, {});
+      pageEl.innerHTML = html;
+      Ch.flowGraph(document.getElementById('taint-flow'), d.nodes || [], d.edges || [], {});
     }
 
     if (API_LOADED) {
@@ -490,6 +498,7 @@
 
   /* ── Dataflow ── */
   function renderDataflow() {
+    console.log('[Security Swarm] Rendering page: dataflow (' + ALL_FINDINGS.length + ' findings)');
     /* Compute stats directly from real findings by category */
     var catCounts = {};
     ALL_FINDINGS.forEach(function (f) { catCounts[f.category] = (catCounts[f.category] || 0) + 1; });
@@ -544,7 +553,9 @@
 
   /* ── Formal Verification ── */
   function renderFormalVerification() {
+    console.log('[Security Swarm] Rendering page: formal-verification (API_LOADED=' + API_LOADED + ')');
     function doRender(d) {
+      console.log('[Security Swarm] Formal verification data:', d ? 'received (' + (d.total_properties || 0) + ' properties)' : 'none');
       var html;
       if (!d) {
         html = C.sectionHeader({ title: 'Formal Verification', subtitle: 'Z3 + Kani' });
@@ -632,7 +643,9 @@
 
   /* ── Fuzzing ── */
   function renderFuzzing() {
+    console.log('[Security Swarm] Rendering page: fuzzing (API_LOADED=' + API_LOADED + ')');
     function doRender(d) {
+      console.log('[Security Swarm] Fuzzing data:', d ? 'received (' + (d.campaigns || []).length + ' campaigns)' : 'none');
       var html;
       if (!d || !d.campaigns) {
         html = C.sectionHeader({ title: 'Security Fuzzing', subtitle: 'Security Fuzzer, Trident, and FuzzDelSol' });
@@ -726,6 +739,7 @@
 
   /* ── Analyzers ── */
   function renderAnalyzers() {
+    console.log('[Security Swarm] Rendering page: analyzers (' + ALL_FINDINGS.length + ' findings)');
     /* Derive dynamic counts from live findings by category */
     var catCounts = {};
     ALL_FINDINGS.forEach(function (f) {
@@ -776,6 +790,7 @@
 
   /* ── Security Scan ── */
   function renderScan() {
+    console.log('[Security Swarm] Rendering page: scan');
     var scanTypes = [
       { id: 'repo', icon: 'globe', label: 'GitHub Repository', placeholder: 'https://github.com/org/repo', desc: 'Clone and audit an entire Solana project repository' },
       { id: 'program', icon: 'programs', label: 'Solana Program ID', placeholder: 'e.g. TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', desc: 'Scan a deployed on-chain program by its public key' },
@@ -1127,7 +1142,9 @@
 
   /* ── Monitoring ── */
   function renderMonitoring() {
+    console.log('[Security Swarm] Rendering page: monitoring (API_LOADED=' + API_LOADED + ')');
     function doRender(apiData) {
+      console.log('[Security Swarm] Monitoring data:', apiData ? 'received (' + (apiData.total_alerts || 0) + ' alerts)' : 'none');
       var monStatus = 'INACTIVE';
       var alertCount = '0';
       var activeMonitors = '0';
@@ -1310,6 +1327,7 @@
 
   /* ── Explorer ── */
   function renderExplorer() {
+    console.log('[Security Swarm] Rendering page: explorer (API_LOADED=' + API_LOADED + ')');
     explorerTxMap = {};
 
     /* Build transaction entries from real audit data — each finding's instruction
@@ -1552,6 +1570,7 @@
 
   /* ── Registry ── */
   function renderRegistry() {
+    console.log('[Security Swarm] Rendering page: registry (' + PROGRAMS.length + ' programs, ' + ALL_FINDINGS.length + ' findings)');
     var sev = sumBySeverity(ALL_FINDINGS);
     var html = C.sectionHeader({ title: 'On-Chain Exploit Registry', subtitle: 'Deployed audit records and vulnerability disclosures across ' + PROGRAMS.length + ' programs' });
 
@@ -1611,7 +1630,9 @@
 
   /* ── Reports ── */
   function renderReports() {
+    console.log('[Security Swarm] Rendering page: reports (API_LOADED=' + API_LOADED + ')');
     function doRender(reportList) {
+      console.log('[Security Swarm] Reports data:', reportList ? reportList.length + ' reports' : 'none');
       var html = C.sectionHeader({ title: 'Report Generation', subtitle: 'Export audit results — ' + PROGRAMS.length + ' programs, ' + ALL_FINDINGS.length + ' findings' });
 
       var formats = [
@@ -1724,6 +1745,7 @@
 
   function navigateTo(page) {
     if (!pages[page]) page = 'overview';
+    console.log('[Security Swarm] Navigating to: ' + page);
     currentPage = page;
 
     if (monitoringWs) {
@@ -1823,7 +1845,7 @@
     if (findingCard) {
       var uid = findingCard.getAttribute('data-uid');
       var finding = ALL_FINDINGS.filter(function (f) { return f._uid === uid; })[0];
-      if (finding) openModal(finding.vulnerability_type, C.findingDetail(finding));
+      if (finding) openModal(C.esc(finding.vulnerability_type), C.findingDetail(finding));
       return;
     }
 
@@ -1832,7 +1854,7 @@
     if (tableRow && currentPage === 'findings') {
       var rowUid = tableRow.getAttribute('data-uid');
       var rowFinding = ALL_FINDINGS.filter(function (f) { return f._uid === rowUid; })[0];
-      if (rowFinding) openModal(rowFinding.vulnerability_type, C.findingDetail(rowFinding));
+      if (rowFinding) openModal(C.esc(rowFinding.vulnerability_type), C.findingDetail(rowFinding));
       return;
     }
 
@@ -2340,6 +2362,7 @@
         });
 
         API_LOADED = true;
+        console.log('[Security Swarm] API connected — loaded ' + PROGRAMS.length + ' programs, ' + ALL_FINDINGS.length + ' findings');
         showToast('Connected to Production API — loaded ' + ALL_FINDINGS.length + ' genuine findings', 'success');
       });
     }).catch(function (err) {
