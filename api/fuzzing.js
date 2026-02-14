@@ -1,4 +1,6 @@
 const vaultReport = require('../production_audit_results/vulnerable-vault_report.json');
+const tokenReport = require('../production_audit_results/vulnerable_token_report.json');
+const stakingReport = require('../production_audit_results/vulnerable_staking_report.json');
 
 module.exports = (req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -10,32 +12,32 @@ module.exports = (req, res) => {
         return;
     }
 
-    res.status(200).json({
-        average_coverage: vaultReport.enhanced_summary?.coverage_percentage || 82.5,
-        total_iterations: 12500000,
-        total_crashes: vaultReport.total_exploits || 12,
-        total_campaigns: 4,
-        campaigns: [
-            {
-                id: 'FZ-VAULT-01',
-                target: 'vulnerable-vault',
-                status: 'completed',
-                coverage_percent: 94,
-                iterations: 5000000,
-                crashes_found: vaultReport.critical_count,
-                unique_paths: 1420,
-                duration_seconds: 3600
-            },
-            {
-                id: 'FZ-TOKEN-02',
-                target: 'vulnerable-token',
-                status: 'running',
-                coverage_percent: 62,
-                iterations: 2500000,
-                crashes_found: 1,
-                unique_paths: 450,
-                duration_seconds: 1800
+    var reports = [
+        { name: 'vulnerable-vault', data: vaultReport, id: 'FZ-VAULT-01' },
+        { name: 'vulnerable-token', data: tokenReport, id: 'FZ-TOKEN-01' },
+        { name: 'vulnerable-staking', data: stakingReport, id: 'FZ-STAKE-01' }
+    ];
+
+    var campaigns = reports.map(function (r) {
+        return {
+            id: r.id,
+            target: r.name,
+            status: 'completed',
+            crashes_found: r.data.critical_count + r.data.high_count,
+            unique_paths: r.data.total_exploits,
+            findings_breakdown: {
+                critical: r.data.critical_count,
+                high: r.data.high_count,
+                medium: r.data.medium_count
             }
-        ]
+        };
+    });
+
+    var totalCrashes = campaigns.reduce(function (s, c) { return s + c.crashes_found; }, 0);
+
+    res.status(200).json({
+        total_crashes: totalCrashes,
+        total_campaigns: campaigns.length,
+        campaigns: campaigns
     });
 };

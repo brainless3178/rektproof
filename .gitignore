@@ -30,6 +30,10 @@ audit_reports/v2_report.json
 !/README.md
 **/audit_reports/*.json
 
-# Local Netlify folder
+# Third-party test targets (cloned repos, ~718MB)
+test_targets/
+
+# Local deploy folders
 .netlify
-.netlify
+.vercel
+.env*.local

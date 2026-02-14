@@ -1,0 +1,35 @@
+# Rust crates and programs (not needed for Vercel serverless)
+crates/
+programs/
+exploits/
+target/
+
+# Tests and scripts
+tests/
+scripts/
+
+# Audit report HTML files (API uses production_audit_results/ JSON)
+audit_reports/
+
+# Build configs not needed for Vercel
+Cargo.toml
+Cargo.lock
+Anchor.toml
+Dockerfile
+docker-compose.yml
+.dockerignore
+tsconfig.json
+
+# Data and docs
+data/
+docs/
+
+# Misc root scripts
+*.sh
+*.py
+swarm
+deployed_programs.json
+analyzer.example.toml
+
+# GitHub workflows
+.github/

@@ -1,4 +1,6 @@
 const vaultReport = require('../production_audit_results/vulnerable-vault_report.json');
+const tokenReport = require('../production_audit_results/vulnerable_token_report.json');
+const stakingReport = require('../production_audit_results/vulnerable_staking_report.json');
 
 module.exports = (req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -10,26 +12,52 @@ module.exports = (req, res) => {
         return;
     }
 
-    // Derive taint nodes and edges from real arithmetic and logic findings
-    const findings = vaultReport.exploits.slice(0, 10);
-    const nodes = [
+    var nodes = [
         { id: 'user_input', label: 'User Instruction Data', type: 'source', color: '#ff4757' },
-        { id: 'instr_handler', label: 'Instruction Handler', type: 'transform', color: '#ffa502' }
+        { id: 'vault_handler', label: 'Vault Handler', type: 'transform', color: '#ffa502' },
+        { id: 'token_handler', label: 'Token Handler', type: 'transform', color: '#ffa502' },
+        { id: 'staking_handler', label: 'Staking Handler', type: 'transform', color: '#ffa502' }
     ];
-    const edges = [
-        { from: 'user_input', to: 'instr_handler', label: 'tainted' }
+    var edges = [
+        { from: 'user_input', to: 'vault_handler', label: 'tainted' },
+        { from: 'user_input', to: 'token_handler', label: 'tainted' },
+        { from: 'user_input', to: 'staking_handler', label: 'tainted' }
     ];
 
-    findings.forEach((f, i) => {
-        const nodeId = `var_${i}`;
-        nodes.push({
-            id: nodeId,
-            label: f.instruction || 'variable',
-            type: 'sink',
-            color: f.severity >= 4 ? '#ff4757' : '#ffa502'
+    var reports = [
+        { data: vaultReport, handler: 'vault_handler', prefix: 'vault' },
+        { data: tokenReport, handler: 'token_handler', prefix: 'token' },
+        { data: stakingReport, handler: 'staking_handler', prefix: 'staking' }
+    ];
+
+    reports.forEach(function (r) {
+        var exploits = (r.data.exploits || []).slice(0, 5);
+        exploits.forEach(function (f, i) {
+            var nodeId = r.prefix + '_sink_' + i;
+            nodes.push({
+                id: nodeId,
+                label: f.instruction || f.vulnerability_type || 'sink',
+                type: 'sink',
+                color: f.severity >= 4 ? '#ff4757' : '#ffa502'
+            });
+            edges.push({ from: r.handler, to: nodeId, label: f.category || 'flow' });
         });
-        edges.push({ from: 'instr_handler', to: nodeId, label: 'flow' });
     });
 
-    res.status(200).json({ nodes, edges });
+    var deepTaint = (vaultReport.deep_analysis && vaultReport.deep_analysis.enhanced_taint) || {};
+
+    res.status(200).json({
+        nodes,
+        edges,
+        total_sources: nodes.filter(function (n) { return n.type === 'source'; }).length,
+        total_sinks: nodes.filter(function (n) { return n.type === 'sink'; }).length,
+        total_flows: edges.length,
+        critical_flows: nodes.filter(function (n) { return n.color === '#ff4757'; }).length,
+        enhanced_taint_summary: {
+            interprocedural_flows: deepTaint.interprocedural_flows || 0,
+            context_sensitive_findings: deepTaint.context_sensitive_findings || 0,
+            field_sensitive_findings: deepTaint.field_sensitive_findings || 0,
+            path_sensitive_findings: deepTaint.path_sensitive_findings || 0
+        }
+    });
 };

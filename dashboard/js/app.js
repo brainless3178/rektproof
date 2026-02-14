@@ -427,11 +427,22 @@
   /* ── Taint Analysis ── */
   function renderTaintAnalysis() {
     function doRender(d) {
-      var totalSources = d ? d.total_sources : 14;
-      var totalSinks = d ? d.total_sinks : 8;
-      var totalFlows = d ? d.total_flows : 6;
-      var criticalFlows = d ? d.critical_flows : 3;
-      var flows = d ? d.flows : null;
+      var html;
+      if (!d || !d.nodes) {
+        html = C.sectionHeader({ title: 'Taint Analysis', subtitle: 'Data flow propagation and taint tracking visualization' });
+        html += '<div style="padding:100px 40px; text-align:center; border:2px dashed var(--border-subtle); border-radius:12px; margin-top:24px;">' +
+          '<div style="font-size:3rem; margin-bottom:20px;">🔬</div>' +
+          '<h3 style="color:var(--text-primary); margin-bottom:8px;">No Taint Data Available</h3>' +
+          '<p style="color:var(--text-muted); max-width:400px; margin:0 auto;">No active taint propagation paths detected for the current scan set.</p>' +
+          '</div>';
+        pageEl.innerHTML = html;
+        return;
+      }
+      var totalSources = d.total_sources || d.nodes.filter(function (n) { return n.type === 'source' }).length || 0;
+      var totalSinks = d.total_sinks || d.nodes.filter(function (n) { return n.type === 'sink' }).length || 0;
+      var totalFlows = d.total_flows || d.edges.length || 0;
+      var criticalFlows = d.critical_flows || d.nodes.filter(function (n) { return n.color === '#ff4757' }).length || 0;
+      var flows = d.flows || [];
 
       var html = C.sectionHeader({ title: 'Taint Analysis', subtitle: 'Data flow propagation and taint tracking visualization' });
 
@@ -501,18 +512,12 @@
     if (ALL_FINDINGS.length > 0) {
       html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-top:24px;">';
 
-      var deadDefExamples = [
-        ['fn initialize:', '  let mut config = VaultConfig::default();', '  config.fee_rate = 100;  // DEAD: overwritten below', '  config.fee_rate = args.fee_rate;', '  config.authority = ctx.accounts.authority.key();'],
-        ['fn process_swap:', '  let temp_balance = pool.reserve_a;  // DEAD: never read', '  let output = calculate_output(input, pool);'],
-        ['fn claim_rewards:', '  let old_ts = stake.last_claim;  // DEAD: shadowed', '  let old_ts = Clock::get()?.unix_timestamp;']
-      ];
-      html += C.card({ title: I.svg('trash', 16) + ' Dead Definitions', subtitle: deadDefs + ' assignments whose values are never read', body: deadDefExamples.map(function (block) { return C.codeOutput(block); }).join('') });
+      var deadDefExamples = [];
+      var uninitExamples = [];
 
-      var uninitExamples = [
-        ['fn emergency_withdraw:', '  let amount: u64;  // WARNING: uninitialized', '  if condition {', '    amount = vault.balance;', '  }', '  // else branch missing: amount may be uninitialized', '  transfer(amount);  // POTENTIAL USE OF UNINITIALIZED'],
-        ['fn update_oracle:', '  let price: u64;  // declared but not set on all paths', '  match source {', '    Source::Pyth => { price = pyth.price; }', '    Source::Switchboard => { /* MISSING: price not set */ }', '  }', '  state.price = price;  // POTENTIAL UNINIT READ']
-      ];
-      html += C.card({ title: I.svg('alertTriangle', 16) + ' Uninitialized Reads', subtitle: uninitReads + ' potential uses of uninitialized variables', body: uninitExamples.map(function (block) { return C.codeOutput(block); }).join('') });
+      /* Only show snippets if they exist in the findings or as placeholders labeled clearly */
+      html += C.card({ title: I.svg('trash', 16) + ' Arithmetic Issues', subtitle: deadDefs + ' findings related to arithmetic safety', body: '<div style="padding:20px; text-align:center; color:var(--text-muted);">See programs or findings for detailed instruction traces.</div>' });
+      html += C.card({ title: I.svg('alertTriangle', 16) + ' Account Validation Issues', subtitle: uninitReads + ' findings related to account security', body: '<div style="padding:20px; text-align:center; color:var(--text-muted);">See programs or findings for detailed instruction traces.</div>' });
 
       html += '</div>';
     } else {
@@ -540,11 +545,22 @@
   /* ── Formal Verification ── */
   function renderFormalVerification() {
     function doRender(d) {
-      var totalProps = d ? d.total_properties : 24;
-      var verified = d ? d.verified : 18;
-      var failed = d ? d.failed : 4;
-      var undetermined = d ? d.undetermined : 2;
-      var engineName = d ? d.engine : 'Z3 + Kani + Certora';
+      var html;
+      if (!d) {
+        html = C.sectionHeader({ title: 'Formal Verification', subtitle: 'Z3 + Kani' });
+        html += '<div style="padding:100px 40px; text-align:center; border:2px dashed var(--border-subtle); border-radius:12px; margin-top:24px;">' +
+          '<div style="font-size:3rem; margin-bottom:20px;">🛡️</div>' +
+          '<h3 style="color:var(--text-primary); margin-bottom:8px;">No Verification Results</h3>' +
+          '<p style="color:var(--text-muted); max-width:400px; margin:0 auto;">Formal verification results will appear here once the model checker completes analysis.</p>' +
+          '</div>';
+        pageEl.innerHTML = html;
+        return;
+      }
+      var totalProps = d.total_properties || 0;
+      var verified = d.verified || 0;
+      var failed = d.failed || 0;
+      var undetermined = d.undetermined || 0;
+      var engineName = d.engine || 'Z3 + Kani + Certora';
       var apiProps = d ? d.properties : null;
 
       var html = C.sectionHeader({ title: 'Formal Verification', subtitle: engineName });
@@ -582,7 +598,7 @@
           grouped[cat].push({
             name: p.name,
             status: p.status.toLowerCase() === 'verified' ? 'proven' : (p.status.toLowerCase() === 'failed' ? 'violated' : 'unknown'),
-            time: p.verification_time_ms >= 10000 ? (p.verification_time_ms / 1000).toFixed(1) + 's' : p.verification_time_ms + 'ms',
+            time: p.verification_time_ms ? (p.verification_time_ms >= 10000 ? (p.verification_time_ms / 1000).toFixed(1) + 's' : p.verification_time_ms + 'ms') : '—',
             description: p.description,
             source_location: p.source_location
           });
@@ -616,38 +632,40 @@
 
   /* ── Fuzzing ── */
   function renderFuzzing() {
-    function formatDuration(secs) {
-      if (secs >= 3600) return Math.floor(secs / 3600) + 'h ' + Math.floor((secs % 3600) / 60) + 'm';
-      return Math.floor(secs / 60) + 'm ' + (secs % 60) + 's';
-    }
-
     function doRender(d) {
-      var avgCoverage = d ? d.average_coverage : 87.3;
-      var totalIterations = d ? d.total_iterations : 12847;
-      var totalCrashes = d ? d.total_crashes : 7;
-      var campaigns = d ? d.campaigns : null;
+      var html;
+      if (!d || !d.campaigns) {
+        html = C.sectionHeader({ title: 'Security Fuzzing', subtitle: 'Security Fuzzer, Trident, and FuzzDelSol' });
+        html += '<div style="padding:100px 40px; text-align:center; border:2px dashed var(--border-subtle); border-radius:12px; margin-top:24px;">' +
+          '<div style="font-size:3rem; margin-bottom:20px;">💥</div>' +
+          '<h3 style="color:var(--text-primary); margin-bottom:8px;">No Fuzzing Campaigns</h3>' +
+          '<p style="color:var(--text-muted); max-width:400px; margin:0 auto;">Fuzz testing campaigns will appear here once instructions are targeted for localized stress testing.</p>' +
+          '</div>';
+        pageEl.innerHTML = html;
+        return;
+      }
+      var totalCrashes = d.total_crashes || 0;
+      var campaigns = d.campaigns || [];
 
-      var html = C.sectionHeader({ title: 'Security Fuzzing', subtitle: 'Fuzz testing results' + (d ? ' from API' : ' from Security Fuzzer, Trident, and FuzzDelSol') });
+      var html = C.sectionHeader({ title: 'Security Fuzzing', subtitle: 'Fuzz testing results from API' });
 
       html += C.statGrid([
-        C.statCard({ value: avgCoverage + '%', label: 'Avg Coverage', iconName: 'shield', variant: 'accent' }),
-        C.statCard({ value: totalIterations.toLocaleString(), label: 'Total Iterations', iconName: 'zap', variant: 'accent' }),
         C.statCard({ value: totalCrashes, label: 'Crashes Found', iconName: 'criticalAlert', variant: 'critical' }),
-        C.statCard({ value: d ? d.total_campaigns : 3, label: 'Campaigns', iconName: 'database' })
+        C.statCard({ value: d.total_campaigns || campaigns.length, label: 'Campaigns', iconName: 'database' })
       ]);
 
       var fuzzers;
       if (campaigns && campaigns.length) {
         fuzzers = campaigns.map(function (c) {
+          var bd = c.findings_breakdown || {};
           return {
             name: c.id + ' — ' + c.target,
             icon: c.status === 'running' ? 'activity' : 'shield',
-            coverage: c.coverage_percent,
-            cases: c.iterations,
             crashes: c.crashes_found,
             corpus: c.unique_paths,
-            duration: formatDuration(c.duration_seconds),
-            mutations: [],
+            critical: bd.critical || 0,
+            high: bd.high || 0,
+            medium: bd.medium || 0,
             crashes_detail: c.crashes_found > 0 ? [c.crashes_found + ' crash(es) found in "' + c.target + '" (' + c.status + ')'] : []
           };
         });
@@ -666,12 +684,11 @@
         var sparkId = 'fuzz-spark-' + idx;
         var body = '<div style="display:grid;grid-template-columns:auto 1fr;gap:24px;align-items:start;">';
         body += '<div style="min-width:120px;">';
-        body += C.kvRow('Coverage', '<strong>' + fz.coverage + '%</strong>');
-        body += C.kvRow('Test Cases', fz.cases.toLocaleString());
         body += C.kvRow('Crashes', '<span style="color:var(--critical);font-weight:700;">' + fz.crashes + '</span>');
-        body += C.kvRow('Corpus/Paths', fz.corpus);
-        body += C.kvRow('Duration', fz.duration);
-        if (fz.mutations.length) body += C.kvRow('Mutations', fz.mutations.map(function (m) { return '<code style="font-size:0.7rem;">' + m + '</code>'; }).join(' '));
+        body += C.kvRow('Unique Paths', fz.corpus);
+        body += C.kvRow('Critical', '<span style="color:var(--critical);">' + fz.critical + '</span>');
+        body += C.kvRow('High', '<span style="color:var(--high);">' + fz.high + '</span>');
+        body += C.kvRow('Medium', '<span style="color:var(--medium);">' + fz.medium + '</span>');
         body += '</div>';
         body += '<div>';
         body += '<div id="' + covId + '" style="margin-bottom:16px;"></div>';
@@ -686,17 +703,14 @@
       fuzzers.forEach(function (fz, idx) {
         var covEl = document.getElementById('fuzz-cov-' + idx);
         var sparkEl = document.getElementById('fuzz-spark-' + idx);
+        var totalFindings = fz.critical + fz.high + fz.medium;
         if (covEl) Ch.coverageBar(covEl, [
-          { label: 'Instruction coverage', value: fz.coverage, max: 100, color: Ch.COLORS.accent },
-          { label: 'Branch coverage', value: fz.coverage * 0.82, max: 100, color: Ch.COLORS.secondary },
-          { label: 'Path coverage', value: fz.coverage * 0.65, max: 100, color: Ch.COLORS.medium }
+          { label: 'Critical findings', value: fz.critical, max: totalFindings || 1, color: Ch.COLORS.critical },
+          { label: 'High findings', value: fz.high, max: totalFindings || 1, color: Ch.COLORS.high },
+          { label: 'Medium findings', value: fz.medium, max: totalFindings || 1, color: Ch.COLORS.medium }
         ], {});
         if (sparkEl) {
-          var hist = [];
-          for (var i = 0; i < 20; i++) {
-            var detNoise = ((idx * 13 + i * 7) % 11) - 5; /* deterministic */
-            hist.push(Math.round(fz.coverage * (0.3 + 0.7 * (i / 20)) + detNoise));
-          }
+          var hist = [fz.critical, fz.high, fz.medium];
           Ch.sparkline(sparkEl, hist, { color: Ch.COLORS.accent, height: 40 });
         }
       });
@@ -732,7 +746,7 @@
       { name: 'L3X Analyzer', icon: 'layers', status: accountFindings > 10 ? 'warn' : 'pass', findings: accountFindings, desc: 'Bytecode-level analysis for deployed programs', details: 'Analyzed ' + PROGRAMS.length + ' programs | ' + accountFindings + ' account validation findings' },
       { name: 'Geiger Counter', icon: 'activity', status: arithmeticFindings > 5 ? 'warn' : 'pass', findings: arithmeticFindings, desc: 'Unsafe operation detection and risk scoring', details: arithmeticFindings + ' arithmetic safety issues found across all programs' },
       { name: 'Anchor Analyzer', icon: 'lock', status: defiFindings > 10 ? 'warn' : 'pass', findings: defiFindings, desc: 'Anchor-specific constraint and DeFi logic analysis', details: defiFindings + ' DeFi logic & economic invariant findings detected' },
-      { name: 'WACANA Concolic', icon: 'brain', status: pdaFindings > 0 ? 'warn' : 'pass', findings: pdaFindings || Math.round(ALL_FINDINGS.length * 0.02), desc: 'Concolic execution and bytecode symbolic analysis', details: (pdaFindings || Math.round(ALL_FINDINGS.length * 0.02)) + ' exploitable paths found via concolic execution' },
+      { name: 'WACANA Concolic', icon: 'brain', status: pdaFindings > 0 ? 'warn' : 'pass', findings: pdaFindings, desc: 'Concolic execution and bytecode symbolic analysis', details: pdaFindings + ' exploitable paths found via concolic execution' },
       { name: 'Firedancer Monitor', icon: 'wifi', status: 'pass', findings: 0, desc: 'Firedancer validator compatibility checks', details: 'All ' + PROGRAMS.length + ' programs compatible with Firedancer runtime' }
     ];
 
@@ -1114,17 +1128,10 @@
   /* ── Monitoring ── */
   function renderMonitoring() {
     function doRender(apiData) {
-      var monStatus = 'ACTIVE';
-      var alertCount = '3';
-      var activeMonitors = '12';
-      var alerts = [
-        { time: '2 min ago', msg: 'Unusual withdrawal pattern on vulnerable-vault', level: 'high' },
-        { time: '14 min ago', msg: 'Large swap detected: 50,000 SOL on vulnerable-token', level: 'medium' },
-        { time: '1 hr ago', msg: 'New program deployment detected on mainnet', level: 'info' },
-        { time: '3 hr ago', msg: 'Oracle price deviation >5% on Pyth feed', level: 'high' },
-        { time: '6 hr ago', msg: 'Staking rewards claimed by unknown authority', level: 'critical' },
-        { time: '12 hr ago', msg: 'All systems nominal - routine check passed', level: 'info' }
-      ];
+      var monStatus = 'INACTIVE';
+      var alertCount = '0';
+      var activeMonitors = '0';
+      var alerts = [];
 
       if (apiData) {
         monStatus = (apiData.status || 'active').toUpperCase();

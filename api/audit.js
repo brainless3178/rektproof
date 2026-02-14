@@ -8,12 +8,23 @@ module.exports = (req, res) => {
         return;
     }
 
-    const { target } = req.body || {};
+    if (req.method !== 'POST') {
+        res.status(405).json({ error: 'Method not allowed. Use POST.' });
+        return;
+    }
+
+    var body = req.body || {};
+    var target = body.target || body.program_id;
+
+    if (!target) {
+        res.status(400).json({ error: 'Missing required field: target or program_id' });
+        return;
+    }
 
     res.status(200).json({
         ok: true,
-        scan_id: `SCAN-${Math.random().toString(36).substring(7).toUpperCase()}`,
-        message: `Audit started for ${target || 'requested target'}`,
-        estimated_time: '4.2 seconds'
+        message: 'Audit request received for ' + target,
+        target: target,
+        note: 'Audit engine processes requests asynchronously. Check /api/status for engine state.'
     });
 };

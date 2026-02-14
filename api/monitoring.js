@@ -1,4 +1,6 @@
 const vaultReport = require('../production_audit_results/vulnerable-vault_report.json');
+const tokenReport = require('../production_audit_results/vulnerable_token_report.json');
+const stakingReport = require('../production_audit_results/vulnerable_staking_report.json');
 
 module.exports = (req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -10,16 +12,28 @@ module.exports = (req, res) => {
         return;
     }
 
+    var allExploits = []
+        .concat((vaultReport.exploits || []).map(function (e) { return Object.assign({}, e, { _program: 'vulnerable-vault' }); }))
+        .concat((tokenReport.exploits || []).map(function (e) { return Object.assign({}, e, { _program: 'vulnerable-token' }); }))
+        .concat((stakingReport.exploits || []).map(function (e) { return Object.assign({}, e, { _program: 'vulnerable-staking' }); }));
+
+    var criticalAlerts = allExploits.filter(function (e) { return e.severity >= 4; });
+
+    var alerts = criticalAlerts.slice(0, 10).map(function (f) {
+        return {
+            timestamp: vaultReport.timestamp || tokenReport.timestamp || '2026-02-13T00:00:00Z',
+            description: f.vulnerability_type + ' in ' + (f.instruction || 'unknown') + ' (' + f._program + ')',
+            severity: (f.severity_label || 'HIGH').toLowerCase(),
+            program: f._program,
+            finding_id: f.id,
+            resolved: f.state === 'Fixed'
+        };
+    });
+
     res.status(200).json({
         status: 'active',
-        total_alerts: vaultReport.exploits.length,
-        active_monitors: 24,
-        alerts: vaultReport.exploits.slice(0, 5).map((f, i) => ({
-            timestamp: new Date(Date.now() - i * 3600000).toISOString(),
-            description: `Potential ${f.vulnerability_type} detected in instruction ${f.instruction}`,
-            severity: f.severity_label.toLowerCase(),
-            transaction_signature: `${Math.random().toString(36).substring(2, 10)}...${Math.random().toString(36).substring(2, 6)}`,
-            resolved: i > 2
-        }))
+        total_alerts: criticalAlerts.length,
+        active_monitors: 3,
+        alerts: alerts
     });
 };

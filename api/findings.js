@@ -1,5 +1,6 @@
-const data = require('../data/colosseum_projects.json');
-const rawReport = require('../production_audit_results/vulnerable-vault_report.json');
+const vaultReport = require('../production_audit_results/vulnerable-vault_report.json');
+const tokenReport = require('../production_audit_results/vulnerable_token_report.json');
+const stakingReport = require('../production_audit_results/vulnerable_staking_report.json');
 
 module.exports = (req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -11,30 +12,30 @@ module.exports = (req, res) => {
         return;
     }
 
-    // Map real findings from our security engine to the Colosseum projects
-    const findings = [];
-    const sourceExploits = rawReport.exploits;
+    function mapFindings(report, programName) {
+        return (report.exploits || []).map(function (e) {
+            return {
+                id: e.id,
+                program_name: programName,
+                category: e.category,
+                vulnerability_type: e.vulnerability_type,
+                severity: e.severity,
+                severity_label: e.severity_label,
+                instruction: e.instruction,
+                description: e.description,
+                attack_scenario: e.attack_scenario,
+                secure_fix: e.secure_fix,
+                economic_impact: e.value_at_risk_usd
+                    ? '$' + Number(e.value_at_risk_usd).toLocaleString() + ' at risk'
+                    : (e.economic_impact || 'See report for details')
+            };
+        });
+    }
 
-    data.projects.slice(0, 50).forEach((p, idx) => {
-        // Pick 1-3 findings for each project to show variety
-        const numFindings = (idx % 3) + 1;
-        for (let i = 0; i < numFindings; i++) {
-            const source = sourceExploits[(idx + i) % sourceExploits.length];
-            findings.push({
-                id: `COL-${p.slug.substring(0, 4).toUpperCase()}-${source.id}`,
-                program_name: p.title,
-                category: source.category,
-                vulnerability_type: source.vulnerability_type,
-                severity: source.severity,
-                severity_label: source.severity_label,
-                instruction: source.instruction,
-                description: source.description,
-                attack_scenario: source.attack_scenario,
-                secure_fix: source.secure_fix,
-                economic_impact: source.value_at_risk_usd ? `$${source.value_at_risk_usd.toLocaleString()} at risk` : 'High potential loss'
-            });
-        }
-    });
+    var findings = []
+        .concat(mapFindings(vaultReport, 'vulnerable-vault'))
+        .concat(mapFindings(tokenReport, 'vulnerable-token'))
+        .concat(mapFindings(stakingReport, 'vulnerable-staking'));
 
     res.status(200).json({ findings });
 };
