@@ -1,0 +1,39 @@
+# Tarpaulin Code Coverage Configuration
+# Run with: cargo tarpaulin --config .cargo/tarpaulin.toml
+
+[default]
+# Key parameters
+timeout = "300"
+output-dir = "target/tarpaulin"
+
+# Packages to measure coverage on
+packages = [
+    "program-analyzer",
+    "shanon-api",
+    "shanon-guard",
+    "git-scanner",
+    "firedancer-monitor",
+    "token-scanner",
+    "cpi-analyzer",
+    "compliance-reporter",
+]
+
+# Output formats
+out = ["Html", "Json", "Lcov"]
+
+# Exclude test code itself from coverage measurement
+exclude-files = [
+    "tests/*",
+    "*/tests/*",
+    "exploits/*",
+    "benchmark-suite/*",
+]
+
+# Enable branch coverage
+branch = true
+
+# Fail if coverage drops below this threshold
+fail-under = 40
+
+# Run all test types
+run-types = ["Tests", "Doctests"]

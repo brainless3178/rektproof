@@ -1,0 +1,22 @@
+[package]
+name = "fv-web-server"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "fv-web-server"
+path = "src/main.rs"
+
+[dependencies]
+tokio = { workspace = true }
+actix-web = { workspace = true }
+actix-cors = { workspace = true }
+actix-files = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+log = { workspace = true }
+env_logger = "0.10"
+chrono = { workspace = true }
+fv-scanner-core = { path = "../fv-scanner-core" }
+uuid = { version = "1", features = ["v4"] }

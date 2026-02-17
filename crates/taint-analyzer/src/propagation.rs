@@ -154,12 +154,7 @@ impl TaintAnalyzer {
 
     /// Analyze a single source file
     pub fn analyze_file(&mut self, file: &File, filename: String) {
-        let mut visitor = TaintVisitor {
-            analyzer: self,
-            current_function: String::new(),
-            filename,
-            scope_stack: vec![HashSet::new()],
-        };
+        let mut visitor = TaintVisitor::new(self, filename);
         visitor.visit_file(file);
     }
 
@@ -506,18 +501,65 @@ struct TaintVisitor<'a> {
     analyzer: &'a mut TaintAnalyzer,
     current_function: String,
     filename: String,
-    scope_stack: Vec<HashSet<String>>,
+    /// Stack of currently active scopes. Each scope is a map from variable name to unique ID.
+    scope_stack: Vec<HashMap<String, String>>,
+    /// Counter for generating unique variable IDs
+    scope_id_counter: usize,
+}
+
+impl<'a> TaintVisitor<'a> {
+    fn new(analyzer: &'a mut TaintAnalyzer, filename: String) -> Self {
+        Self {
+            analyzer,
+            current_function: String::new(),
+            filename,
+            scope_stack: vec![HashMap::new()],
+            scope_id_counter: 0,
+        }
+    }
+
+    fn push_scope(&mut self) {
+        self.scope_stack.push(HashMap::new());
+    }
+
+    fn pop_scope(&mut self) {
+        self.scope_stack.pop();
+    }
+
+    /// Register a variable in the current scope with a unique ID
+    fn register_variable(&mut self, name: &str) -> String {
+        self.scope_id_counter += 1;
+        let unique_id = format!("{}_{}", name, self.scope_id_counter);
+        if let Some(scope) = self.scope_stack.last_mut() {
+            scope.insert(name.to_string(), unique_id.clone());
+        }
+        unique_id
+    }
+
+    /// Resolve a variable name to its unique ID in the innermost scope
+    fn resolve_variable(&self, name: &str) -> String {
+        for scope in self.scope_stack.iter().rev() {
+            if let Some(unique_id) = scope.get(name) {
+                return unique_id.clone();
+            }
+        }
+        // If not found, assume it's a global or hasn't been registered yet (fallback to name)
+        name.to_string()
+    }
 }
 
 impl<'a> Visit<'_> for TaintVisitor<'a> {
     fn visit_item_fn(&mut self, func: &ItemFn) {
         self.current_function = func.sig.ident.to_string();
+        self.push_scope();
 
         // Check function parameters for taint sources
         for param in &func.sig.inputs {
             if let syn::FnArg::Typed(pat_type) = param {
                 if let Pat::Ident(pat_ident) = &*pat_type.pat {
                     let param_name = pat_ident.ident.to_string();
+                    let unique_id = self.register_variable(&param_name);
+                    
                     let ty = &pat_type.ty;
                     let type_str = quote::quote!(#ty).to_string();
 
@@ -526,15 +568,12 @@ impl<'a> Visit<'_> for TaintVisitor<'a> {
                         && !type_str.contains("Program")
                     {
                         self.analyzer.mark_tainted(
-                            &param_name,
+                            &unique_id,
                             TaintSource::InstructionData {
                                 param_name: param_name.clone(),
                             },
                             &format!("{}::{}", self.filename, self.current_function),
                         );
-                        if let Some(scope) = self.scope_stack.last_mut() {
-                            scope.insert(param_name);
-                        }
                     }
                 }
             }
@@ -542,6 +581,13 @@ impl<'a> Visit<'_> for TaintVisitor<'a> {
 
         // Continue visiting the function body
         syn::visit::visit_item_fn(self, func);
+        self.pop_scope();
+    }
+
+    fn visit_block(&mut self, block: &syn::Block) {
+        self.push_scope();
+        syn::visit::visit_block(self, block);
+        self.pop_scope();
     }
 
     fn visit_stmt(&mut self, stmt: &Stmt) {
@@ -552,12 +598,14 @@ impl<'a> Visit<'_> for TaintVisitor<'a> {
                 let expr = &init.expr;
                 let pat = &local.pat;
 
-                let target_vars = self.extract_vars_from_pat(pat);
                 let source_vars = self.extract_variables(expr);
+                let resolved_sources: Vec<String> = source_vars.iter().map(|v| self.resolve_variable(v)).collect();
 
-                for target in target_vars {
-                    for source in &source_vars {
-                        self.analyzer.add_dependency(source, &target, &location);
+                let target_names = self.extract_vars_from_pat(pat);
+                for name in target_names {
+                    let unique_id = self.register_variable(&name);
+                    for source_id in &resolved_sources {
+                        self.analyzer.add_dependency(source_id, &unique_id, &location);
                     }
                 }
             }
@@ -766,14 +814,15 @@ impl<'a> TaintVisitor<'a> {
 
     fn check_expr_taint(&mut self, expr: &Expr, sink_node: NodeIndex) {
         // Extract variable names from expression
-        let expr_str = expr.to_token_stream().to_string();
+        let vars = self.extract_variables(expr);
 
         // Check if any tainted variable appears in this expression
-        for var_name in self.analyzer.taint_state.keys() {
-            if expr_str.contains(var_name) {
+        for var_name in vars {
+            let unique_id = self.resolve_variable(&var_name);
+            if self.analyzer.taint_state.contains_key(&unique_id) {
                 // Create edge from variable to sink
                 let var_node = self.analyzer.flow_graph.add_node(FlowNode {
-                    kind: FlowNodeKind::Variable(var_name.clone()),
+                    kind: FlowNodeKind::Variable(unique_id.clone()),
                     location: format!("{}::{}", self.filename, self.current_function),
                 });
                 self.analyzer.flow_graph.add_edge(

@@ -1,0 +1,12 @@
+
+  ╔═══════════════════════════════════════════════╗
+  ║    🛡️  SHANON — Solana Security Platform      ║
+  ║    72 detectors · Z3 proofs · Guard firewall  ║
+  ╚═══════════════════════════════════════════════╝
+
+  👁️ Setting up authority watcher for JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4...
+    ℹ No webhooks configured — alerts will be logged to console only
+
+  🔄 Polling every 5s on https://api.mainnet-beta.solana.com
+  ℹ Press Ctrl+C to stop
+

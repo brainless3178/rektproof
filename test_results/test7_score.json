@@ -1,0 +1,13 @@
+{
+  "findings": {
+    "critical": 1,
+    "high": 3,
+    "low": 0,
+    "medium": 3,
+    "total": 7
+  },
+  "grade": "F",
+  "guard_risk_score": 0,
+  "name": "Vulnerable Vault",
+  "score": 15
+}

@@ -556,13 +556,15 @@ mod tests {
     #[test]
     fn test_fuzzer_creation() {
         let fuzzer = TridentFuzzer::new();
-        assert!(!fuzzer.executor.is_trident_available());
+        // Trident availability depends on environment — just verify construction
+        let _ = fuzzer.executor.is_trident_available();
     }
 
     #[test]
     fn test_fuzzer_default() {
         let fuzzer = TridentFuzzer::default();
-        assert!(!fuzzer.executor.is_trident_available());
+        // Trident availability depends on environment — just verify construction
+        let _ = fuzzer.executor.is_trident_available();
     }
 
     #[test]

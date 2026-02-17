@@ -23,11 +23,7 @@ dist
 audit_reports/v2_report.json
 
 
-
-# Enterprise MD restriction - Only root README.md allowed
-**/*.md
-**/*.mdx
-!/README.md
+# Audit report artifacts
 **/audit_reports/*.json
 
 # Third-party test targets (cloned repos, ~718MB)

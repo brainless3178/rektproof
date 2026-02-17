@@ -1,0 +1,34 @@
+[package]
+name = "shanon-cli"
+version.workspace = true
+edition.workspace = true
+description = "Shanon — Solana Security Platform CLI"
+
+[[bin]]
+name = "shanon"
+path = "src/main.rs"
+
+[dependencies]
+# CLI framework
+clap = { workspace = true }
+colored = { workspace = true }
+
+# Async runtime
+tokio = { workspace = true }
+serde_json = { workspace = true }
+
+# TUI Dashboard
+ratatui = "0.28"
+crossterm = "0.28"
+dotenvy = "0.15"
+
+# Internal crates
+program-analyzer = { path = "../program-analyzer" }
+shanon-guard = { path = "../shanon-guard" }
+firedancer-monitor = { path = "../firedancer-monitor" }
+cpi-analyzer = { path = "../cpi-analyzer" }
+token-security-expert = { path = "../token-security-expert" }
+shanon-monitor = { path = "../shanon-monitor" }
+compliance-reporter = { path = "../compliance-reporter" }
+shanon-verify = { path = "../shanon-verify" }
+ai-enhancer = { path = "../ai-enhancer" }

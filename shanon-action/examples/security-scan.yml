@@ -1,0 +1,42 @@
+# ──────────────────────────────────────────────────────────
+# Example: Add this to your Solana project's .github/workflows/
+# One-line Shanon Security integration
+# ──────────────────────────────────────────────────────────
+
+name: Shanon Security
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write
+  checks: write
+
+jobs:
+  security-scan:
+    name: 🛡️ Shanon Security Scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run Shanon Security Scan
+        id: shanon
+        uses: shanon-web3/shanon-action@v1
+        with:
+          program-path: './programs/'
+          fail-on: 'critical,high'
+          guard: 'true'
+          annotate: 'true'
+
+      - name: Check Results
+        if: always()
+        run: |
+          echo "Risk Score: ${{ steps.shanon.outputs.risk-score }}"
+          echo "Findings:   ${{ steps.shanon.outputs.findings-count }}"
+          echo "Critical:   ${{ steps.shanon.outputs.critical-count }}"

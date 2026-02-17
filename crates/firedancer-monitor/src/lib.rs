@@ -16,6 +16,12 @@ pub mod skip_vote_detector;
 pub mod stress_analyzer;
 pub mod verification_lag;
 
+// Firedancer compatibility static analysis
+pub mod compatibility;
+pub mod compute_budget;
+pub mod runtime_diff_db;
+pub mod syscall_analyzer;
+
 use latency_monitor::LatencyMonitor;
 use report::{FiredancerFinding, FiredancerMonitorReport, FiredancerSeverity};
 use skip_vote_detector::SkipVoteDetector;
@@ -206,18 +212,38 @@ impl FiredancerMonitor {
         })
     }
 
-    /// Calculate validator health score based on findings
+    /// Calculate validator health score based on findings.
+    ///
+    /// Scoring uses diminishing returns per severity class to prevent
+    /// normal programs with expected findings from receiving F grades.
+    /// Max deductions: Critical=-40, High=-25, Medium=-15, Low=-8.
     fn calculate_health_score(&self, findings: &[FiredancerFinding]) -> u8 {
         let mut score: f64 = 100.0;
 
+        // Count findings per severity
+        let mut crit = 0u32;
+        let mut high = 0u32;
+        let mut med = 0u32;
+        let mut low = 0u32;
+
         for finding in findings {
             match finding.severity {
-                FiredancerSeverity::Critical => score -= 15.0,
-                FiredancerSeverity::High => score -= 10.0,
-                FiredancerSeverity::Medium => score -= 5.0,
-                FiredancerSeverity::Low => score -= 2.0,
+                FiredancerSeverity::Critical => crit += 1,
+                FiredancerSeverity::High => high += 1,
+                FiredancerSeverity::Medium => med += 1,
+                FiredancerSeverity::Low => low += 1,
             }
         }
+
+        // Diminishing returns: first finding of each class costs full, subsequent less
+        // Critical: 15 + 10 + 8 + 7 ... capped at -40
+        score -= (crit as f64 * 15.0 / (1.0 + crit as f64 * 0.2)).min(40.0);
+        // High: 10 + 7 + 5... capped at -25
+        score -= (high as f64 * 10.0 / (1.0 + high as f64 * 0.3)).min(25.0);
+        // Medium: 5 + 3 + 2... capped at -15
+        score -= (med as f64 * 5.0 / (1.0 + med as f64 * 0.4)).min(15.0);
+        // Low: 2 + 1.5... capped at -8
+        score -= (low as f64 * 2.0 / (1.0 + low as f64 * 0.5)).min(8.0);
 
         score.clamp(0.0, 100.0) as u8
     }

@@ -1,0 +1,61 @@
+name: 'Shanon Security Scan'
+description: 'Enterprise-grade Solana security: 52+ detectors + Z3 proofs + dependency firewall'
+author: 'Shanon Security'
+
+branding:
+  icon: 'shield'
+  color: 'blue'
+
+inputs:
+  program-path:
+    description: 'Path to Solana program source'
+    required: true
+    default: './programs/'
+  fail-on:
+    description: 'Comma-separated severities to fail on (critical,high,medium,low)'
+    required: false
+    default: 'critical,high'
+  prove:
+    description: 'Run Z3 formal proofs (requires z3 system library)'
+    required: false
+    default: 'false'
+  guard:
+    description: 'Run dependency firewall (shanon guard)'
+    required: false
+    default: 'true'
+  annotate:
+    description: 'Add inline PR comments with findings'
+    required: false
+    default: 'true'
+  format:
+    description: 'Output format: json, sarif, human'
+    required: false
+    default: 'json'
+  token:
+    description: 'GitHub token for PR annotations (defaults to github.token)'
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  risk-score:
+    description: 'Overall risk score (0-100)'
+  findings-count:
+    description: 'Total findings count'
+  critical-count:
+    description: 'Critical findings count'
+  high-count:
+    description: 'High findings count'
+  report-json:
+    description: 'Full JSON report (base64 encoded)'
+
+runs:
+  using: 'docker'
+  image: 'Dockerfile'
+  args:
+    - ${{ inputs.program-path }}
+    - ${{ inputs.fail-on }}
+    - ${{ inputs.prove }}
+    - ${{ inputs.guard }}
+    - ${{ inputs.annotate }}
+    - ${{ inputs.format }}
+    - ${{ inputs.token }}

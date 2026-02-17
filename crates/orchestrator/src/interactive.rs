@@ -119,8 +119,6 @@ pub struct ScanConfig {
     pub dashboard: bool,
     pub prove: bool,
     pub register: bool,
-    pub post_to_forum: bool,
-    pub hackathon_api_key: Option<String>,
     pub wacana: bool,
     pub trident: bool,
     pub fuzzdelsol: bool,
@@ -420,25 +418,6 @@ fn scan_wizard(theme: &ColorfulTheme) -> anyhow::Result<WizardResult> {
         .default(false)
         .interact()?;
 
-    let post_to_forum = Confirm::with_theme(theme)
-        .with_prompt("Submit results to hackathon forum?")
-        .default(false)
-        .interact()?;
-
-    let hackathon_api_key = if post_to_forum {
-        let key: String = Input::with_theme(theme)
-            .with_prompt("Hackathon API key (or set HACKATHON_API_KEY env var)")
-            .allow_empty(true)
-            .interact_text()?;
-        if key.trim().is_empty() {
-            None
-        } else {
-            Some(key.trim().to_string())
-        }
-    } else {
-        None
-    };
-
     let dashboard = Confirm::with_theme(theme)
         .with_prompt("Launch dashboard after scan?")
         .default(false)
@@ -453,8 +432,6 @@ fn scan_wizard(theme: &ColorfulTheme) -> anyhow::Result<WizardResult> {
         dashboard,
         prove,
         register,
-        post_to_forum,
-        hackathon_api_key,
         wacana,
         trident,
         fuzzdelsol,
@@ -511,10 +488,6 @@ fn scan_wizard(theme: &ColorfulTheme) -> anyhow::Result<WizardResult> {
     println!(
         "  ├ Register:   {}",
         if config.register { "Yes" } else { "No" }
-    );
-    println!(
-        "  ├ Forum:      {}",
-        if config.post_to_forum { "Yes" } else { "No" }
     );
     println!(
         "  └ Dashboard:  {}",

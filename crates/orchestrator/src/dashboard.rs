@@ -18,6 +18,13 @@ use crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
+const COLOR_CYAN: Color = Color::Rgb(0, 255, 255);
+const COLOR_NEON_BLUE: Color = Color::Rgb(0, 150, 255);
+const COLOR_AMBER: Color = Color::Rgb(255, 191, 0);
+const COLOR_CRIMSON: Color = Color::Rgb(220, 20, 60);
+const COLOR_PURPLE: Color = Color::Rgb(153, 50, 204);
+const COLOR_SLATE: Color = Color::Rgb(47, 79, 79);
+const COLOR_DARK_BG: Color = Color::Rgb(10, 10, 15);
 use ratatui::{
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout, Rect},
@@ -76,6 +83,10 @@ pub struct DashboardState {
     pub search_result_tx: Option<TransactionDetail>,
     /// Input mode for search
     pub input_mode: bool,
+    /// Analyzer statuses (Real vs Mocked)
+    pub analyzer_status: std::collections::HashMap<String, String>,
+    /// Logic Integrity Score (0-100)
+    pub logic_integrity: f32,
 }
 
 impl Default for DashboardState {
@@ -109,6 +120,16 @@ impl Default for DashboardState {
             search_result_account: None,
             search_result_tx: None,
             input_mode: false,
+            analyzer_status: {
+                let mut m = std::collections::HashMap::new();
+                m.insert("Mainnet Guardian".to_string(), "ACTIVE".to_string());
+                m.insert("AI Consensus".to_string(), "VERIFYING".to_string());
+                m.insert("WACANA".to_string(), "IDLE".to_string());
+                m.insert("Trident".to_string(), "IDLE".to_string());
+                m.insert("Crux-MIR".to_string(), "IDLE".to_string());
+                m
+            },
+            logic_integrity: 100.0,
         }
     }
 }
@@ -524,52 +545,28 @@ fn ui(f: &mut Frame, state: &mut DashboardState) {
 fn render_header(f: &mut Frame, area: Rect, state: &DashboardState) {
     let (critical, high, _medium, _low) = state.severity_counts();
 
-    let network_info = if let Some(stats) = &state.network_stats {
-        format!("TPS: {:.1} │ Slot: {}", stats.tps, stats.slot)
+    let network_status = if state.network_stats.is_some() {
+        Span::styled(" ● ONLINE ", Style::default().fg(Color::Green))
     } else {
-        "Network: Syncing...".to_string()
+        Span::styled(" ○ SYNCING ", Style::default().fg(Color::Yellow))
     };
 
-    let header_content = vec![
-        Span::styled(
-            "⚡ SOLANA SECURITY SWARM ",
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled("│ ", Style::default().fg(Color::DarkGray)),
-        Span::styled(
-            format!("{} ", network_info),
-            Style::default().fg(Color::White),
-        ),
-        Span::styled("│ ", Style::default().fg(Color::DarkGray)),
-        Span::styled(
-            format!("Critical: {} ", critical),
-            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(
-            format!("High: {} ", high),
-            Style::default()
-                .fg(Color::Yellow)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled("│ ", Style::default().fg(Color::DarkGray)),
-        Span::styled(
-            format!("Value at Risk: ${:.2}M", state.total_value_at_risk()),
-            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
-        ),
-    ];
+    let title = Line::from(vec![
+        Span::styled(" ⚡ SWARM NODE: ", Style::default().fg(COLOR_CYAN).add_modifier(Modifier::BOLD)),
+        Span::styled("ALPHA-01 ", Style::default().fg(Color::White)),
+        network_status,
+        Span::styled(" │ ", Style::default().fg(Color::DarkGray)),
+        Span::styled("CRIT: ", Style::default().fg(COLOR_CRIMSON).add_modifier(Modifier::BOLD)),
+        Span::styled(format!("{} ", critical), Style::default().fg(Color::White)),
+        Span::styled("HIGH: ", Style::default().fg(COLOR_AMBER).add_modifier(Modifier::BOLD)),
+        Span::styled(format!("{} ", high), Style::default().fg(Color::White)),
+    ]);
 
-    let header = Paragraph::new(Line::from(header_content)).block(
+    let header = Paragraph::new(title).block(
         Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Rgb(0, 255, 255)))
-            .title(" [ SYSTEM NODE: ALPHA-01 ] ")
-            .title_style(
-                Style::default()
-                    .fg(Color::White)
-                    .add_modifier(Modifier::BOLD),
-            ),
+            .border_type(ratatui::widgets::BorderType::Thick)
+            .border_style(Style::default().fg(COLOR_CYAN))
     );
     f.render_widget(header, area);
 }
@@ -581,14 +578,15 @@ fn render_tabs(f: &mut Frame, area: Rect, state: &DashboardState) {
         .iter()
         .enumerate()
         .map(|(i, t)| {
-            let style = if i == state.active_tab {
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD)
+            let (style, prefix) = if i == state.active_tab {
+                (Style::default().fg(COLOR_CYAN).add_modifier(Modifier::BOLD), "▶")
             } else {
-                Style::default().fg(Color::DarkGray)
+                (Style::default().fg(Color::DarkGray), " ")
             };
-            Line::from(Span::styled(format!(" {} [{}] ", t, i + 1), style))
+            Line::from(vec![
+                Span::styled(format!(" {} ", prefix), Style::default().fg(COLOR_CYAN)),
+                Span::styled(format!("{:<12}", t.to_uppercase()), style),
+            ])
         })
         .collect();
 
@@ -596,9 +594,10 @@ fn render_tabs(f: &mut Frame, area: Rect, state: &DashboardState) {
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::DarkGray)),
+                .border_style(Style::default().fg(COLOR_SLATE))
+                .title(" [ NAVIGATION ] "),
         )
-        .highlight_style(Style::default().fg(Color::Cyan))
+        .highlight_style(Style::default().fg(COLOR_CYAN))
         .select(state.active_tab);
     f.render_widget(tabs, area);
 }
@@ -613,9 +612,10 @@ fn render_overview(f: &mut Frame, area: Rect, state: &DashboardState) {
     let top_chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Percentage(33),
-            Constraint::Percentage(33),
-            Constraint::Percentage(34),
+            Constraint::Percentage(25),
+            Constraint::Percentage(25),
+            Constraint::Percentage(25),
+            Constraint::Percentage(25),
         ])
         .split(chunks[0]);
 
@@ -634,13 +634,38 @@ fn render_overview(f: &mut Frame, area: Rect, state: &DashboardState) {
             Block::default()
                 .title(" TRUST SCORE ")
                 .borders(Borders::ALL)
-                .border_type(ratatui::widgets::BorderType::Rounded),
+                .border_type(ratatui::widgets::BorderType::Rounded)
+                .border_style(Style::default().fg(score_color)),
         )
-        .gauge_style(Style::default().fg(score_color).bg(Color::Rgb(20, 20, 20)))
+        .gauge_style(Style::default().fg(score_color).bg(COLOR_DARK_BG))
         .percent(score as u16)
         .label(format!(" {}/100 ", score))
         .use_unicode(true);
     f.render_widget(gauge, top_chunks[0]);
+
+    // Logic Integrity Gauge (New)
+    let integrity = state.logic_integrity;
+    let integrity_color = if integrity > 95.0 {
+        Color::LightGreen
+    } else if integrity > 80.0 {
+        Color::Green
+    } else {
+        Color::Red
+    };
+
+    let i_gauge = Gauge::default()
+        .block(
+            Block::default()
+                .title(" LOGIC INTEGRITY ")
+                .borders(Borders::ALL)
+                .border_type(ratatui::widgets::BorderType::Rounded)
+                .border_style(Style::default().fg(integrity_color)),
+        )
+        .gauge_style(Style::default().fg(integrity_color).bg(COLOR_DARK_BG))
+        .percent(integrity as u16)
+        .label(format!(" {:.1}% ", integrity))
+        .use_unicode(true);
+    f.render_widget(i_gauge, top_chunks[1]);
 
     // Live Metrics Sparkline
     let sparkline = Sparkline::default()
@@ -648,40 +673,37 @@ fn render_overview(f: &mut Frame, area: Rect, state: &DashboardState) {
             Block::default()
                 .title(" SCAN INTENSITY ")
                 .borders(Borders::ALL)
-                .border_type(ratatui::widgets::BorderType::Rounded),
+                .border_type(ratatui::widgets::BorderType::Rounded)
+                .border_style(Style::default().fg(COLOR_NEON_BLUE)),
         )
         .data(&state.score_history)
-        .style(Style::default().fg(Color::Cyan));
-    f.render_widget(sparkline, top_chunks[1]);
+        .style(Style::default().fg(COLOR_NEON_BLUE));
+    f.render_widget(sparkline, top_chunks[2]);
 
     // Active Safeguards
-    let safeguards = vec![
-        Line::from(vec![
-            Span::styled("Mainnet Guardian: ", Style::default().fg(Color::DarkGray)),
+    let mut safeguards = Vec::new();
+    let mut sorted_keys: Vec<_> = state.analyzer_status.keys().collect();
+    sorted_keys.sort();
+    
+    for key in sorted_keys {
+        let status = state.analyzer_status.get(key).unwrap();
+        let color = match status.as_str() {
+            "ACTIVE" | "RUNNING" | "SYNCED" => Color::Green,
+            "VERIFYING" | "SAMPLING" => Color::Cyan,
+            "ARMED" | "CRITICAL" => Color::Red,
+            _ => Color::DarkGray,
+        };
+        
+        safeguards.push(Line::from(vec![
+            Span::styled(format!("{:<18}: ", key), Style::default().fg(Color::DarkGray)),
             Span::styled(
-                "ACTIVE",
+                status,
                 Style::default()
-                    .fg(Color::Green)
+                    .fg(color)
                     .add_modifier(Modifier::BOLD),
             ),
-        ]),
-        Line::from(vec![
-            Span::styled("AI Consensus:     ", Style::default().fg(Color::DarkGray)),
-            Span::styled("SAMPLING", Style::default().fg(Color::Cyan)),
-        ]),
-        Line::from(vec![
-            Span::styled("WACANA Concolic:  ", Style::default().fg(Color::DarkGray)),
-            Span::styled("RUNNING", Style::default().fg(Color::Green)),
-        ]),
-        Line::from(vec![
-            Span::styled("Attack Simulator: ", Style::default().fg(Color::DarkGray)),
-            Span::styled("ARMED", Style::default().fg(Color::Red)),
-        ]),
-        Line::from(vec![
-            Span::styled("Oracle Watcher:   ", Style::default().fg(Color::DarkGray)),
-            Span::styled("SYNCED", Style::default().fg(Color::Green)),
-        ]),
-    ];
+        ]));
+    }
     let safeguards_widget = Paragraph::new(safeguards)
         .block(
             Block::default()
@@ -690,7 +712,7 @@ fn render_overview(f: &mut Frame, area: Rect, state: &DashboardState) {
                 .border_type(ratatui::widgets::BorderType::Rounded),
         )
         .style(Style::default().fg(Color::White));
-    f.render_widget(safeguards_widget, top_chunks[2]);
+    f.render_widget(safeguards_widget, top_chunks[3]);
 
     // Severity Concentration Map
     let (c, h, m, l) = state.severity_counts();
@@ -725,6 +747,7 @@ fn render_overview(f: &mut Frame, area: Rect, state: &DashboardState) {
         .block(chart_block)
         .data(bar_group.clone())
         .bar_width(10)
+        .bar_style(Style::default().fg(COLOR_CYAN))
         .bar_gap(5);
 
     f.render_widget(barchart, chunks[1]);
@@ -751,26 +774,27 @@ fn render_findings(f: &mut Frame, area: Rect, state: &mut DashboardState) {
                     _ => Color::DarkGray,
                 };
                 let severity_icon = match exp.severity {
-                    5 => "🔴",
-                    4 => "🟡",
-                    3 => "🔵",
-                    _ => "⚪",
+                    5 => "☣",
+                    4 => "⚡",
+                    3 => "⚠",
+                    _ => "○",
                 };
                 let content = Line::from(vec![
-                    Span::styled(format!("{} ", severity_icon), Style::default()),
-                    Span::styled(format!("[{}] ", exp.id), Style::default().fg(Color::Cyan)),
+                    Span::styled(format!(" {} ", severity_icon), Style::default().fg(severity_color)),
+                    Span::styled(format!("[{}] ", exp.id), Style::default().fg(COLOR_CYAN)),
                     Span::styled(
-                        exp.vulnerability_type.clone(),
-                        Style::default().fg(severity_color),
+                        exp.vulnerability_type.clone().to_uppercase(),
+                        Style::default().fg(severity_color).add_modifier(Modifier::BOLD),
                     ),
                 ]);
 
                 let style = if i == state.selected_finding {
                     Style::default()
-                        .bg(Color::DarkGray)
+                        .bg(COLOR_SLATE)
+                        .fg(Color::White)
                         .add_modifier(Modifier::BOLD)
                 } else {
-                    Style::default()
+                    Style::default().fg(Color::DarkGray)
                 };
                 ListItem::new(content).style(style)
             })
@@ -1111,19 +1135,25 @@ fn render_help(f: &mut Frame, area: Rect) {
 /// Render footer with status
 fn render_footer(f: &mut Frame, area: Rect, state: &DashboardState) {
     let elapsed = state.last_update.elapsed().as_secs();
+    let heartbeat = if elapsed % 2 == 0 { "⚡" } else { "  " };
+    
     let footer = Paragraph::new(Line::from(vec![
-        Span::styled(" ⚡ ", Style::default().fg(Color::Cyan)),
-        Span::styled(&state.status_message, Style::default().fg(Color::DarkGray)),
-        Span::styled(" │ ", Style::default().fg(Color::DarkGray)),
+        Span::styled(format!(" {} ", heartbeat), Style::default().fg(COLOR_CYAN)),
+        Span::styled("STATUS: ", Style::default().fg(Color::DarkGray).add_modifier(Modifier::BOLD)),
+        Span::styled(&state.status_message, Style::default().fg(Color::White)),
+        Span::styled(" │ ", Style::default().fg(COLOR_SLATE)),
+        Span::styled("UPTIME: ", Style::default().fg(Color::DarkGray)),
         Span::styled(
-            format!("Updated {}s ago", elapsed),
-            Style::default().fg(Color::DarkGray),
+            format!("{}s ", elapsed),
+            Style::default().fg(COLOR_CYAN),
         ),
+        Span::styled("│ NODE_UUID: ", Style::default().fg(Color::DarkGray)),
+        Span::styled("SWARM-772-X ", Style::default().fg(COLOR_PURPLE)),
     ]))
     .block(
         Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::DarkGray)),
+            .border_style(Style::default().fg(COLOR_SLATE)),
     );
     f.render_widget(footer, area);
 }
@@ -1267,76 +1297,68 @@ fn render_finding_detail_popup(f: &mut Frame, state: &DashboardState) {
     f.render_widget(Clear, area);
 
     let severity_color = match exploit.severity {
-        5 => Color::Red,
-        4 => Color::Yellow,
-        3 => Color::Blue,
+        5 => COLOR_CRIMSON,
+        4 => COLOR_AMBER,
+        3 => COLOR_NEON_BLUE,
         _ => Color::DarkGray,
     };
 
     let mut content = vec![
-        Line::from(Span::styled(
-            format!("[{}] {}", exploit.id, exploit.vulnerability_type),
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        )),
+        Line::from(vec![
+            Span::styled(" ⚡ ANALYSIS REPORT: ", Style::default().fg(COLOR_CYAN).add_modifier(Modifier::BOLD)),
+            Span::styled(&exploit.id, Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+        ]),
+        Line::from(vec![
+            Span::styled(" TYPE:      ", Style::default().fg(Color::DarkGray)),
+            Span::styled(exploit.vulnerability_type.to_uppercase(), Style::default().fg(severity_color).add_modifier(Modifier::BOLD)),
+        ]),
+        Line::from(vec![
+            Span::styled(" STATUS:    ", Style::default().fg(Color::DarkGray)),
+            Span::styled("ACTIVE THREAT", Style::default().fg(COLOR_CRIMSON)),
+        ]),
+        Line::from(Span::styled("─".repeat((area.width - 4) as usize), Style::default().fg(Color::Rgb(30, 30, 30)))),
         Line::from(""),
-        Line::from(Span::styled(
-            "DESCRIPTION",
-            Style::default()
-                .fg(Color::White)
-                .add_modifier(Modifier::BOLD),
-        )),
+        Line::from(Span::styled(" 📡 ROOT CAUSE ANALYSIS ", Style::default().fg(Color::White).bg(severity_color).add_modifier(Modifier::BOLD))),
     ];
 
-    for line in wrap_text_lines(&exploit.description, (area.width - 4) as usize) {
-        content.push(Line::from(Span::styled(
-            line,
-            Style::default().fg(Color::DarkGray),
-        )));
+    for line in wrap_text_lines(&exploit.description, (area.width - 6) as usize) {
+        content.push(Line::from(vec![
+            Span::styled("  │ ", Style::default().fg(severity_color)),
+            Span::styled(line, Style::default().fg(Color::White)),
+        ]));
     }
 
     content.push(Line::from(""));
-    content.push(Line::from(Span::styled(
-        "ATTACK SCENARIO",
-        Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
-    )));
-    for line in wrap_text_lines(&exploit.attack_scenario, (area.width - 4) as usize) {
-        content.push(Line::from(Span::styled(
-            line,
-            Style::default().fg(Color::DarkGray),
-        )));
+    content.push(Line::from(Span::styled(" ☢ ATTACK VECTOR ", Style::default().fg(Color::White).bg(COLOR_CRIMSON).add_modifier(Modifier::BOLD))));
+    for line in wrap_text_lines(&exploit.attack_scenario, (area.width - 6) as usize) {
+        content.push(Line::from(vec![
+            Span::styled("  │ ", Style::default().fg(COLOR_CRIMSON)),
+            Span::styled(line, Style::default().fg(COLOR_CRIMSON)),
+        ]));
     }
 
     content.push(Line::from(""));
-    content.push(Line::from(Span::styled(
-        "SECURE FIX",
-        Style::default()
-            .fg(Color::Green)
-            .add_modifier(Modifier::BOLD),
-    )));
-    for line in wrap_text_lines(&exploit.secure_fix, (area.width - 4) as usize) {
-        content.push(Line::from(Span::styled(
-            line,
-            Style::default().fg(Color::Green),
-        )));
+    content.push(Line::from(Span::styled(" 🛠 REMEDIATION STRATEGY ", Style::default().fg(Color::White).bg(Color::Green).add_modifier(Modifier::BOLD))));
+    for line in wrap_text_lines(&exploit.secure_fix, (area.width - 6) as usize) {
+        content.push(Line::from(vec![
+            Span::styled("  │ ", Style::default().fg(Color::Green)),
+            Span::styled(line, Style::default().fg(Color::Green)),
+        ]));
     }
 
     content.push(Line::from(""));
-    content.push(Line::from(Span::styled(
-        "[Press Enter to close]",
-        Style::default().fg(Color::DarkGray),
-    )));
+    content.push(Line::from(Span::styled("─".repeat((area.width - 4) as usize), Style::default().fg(Color::Rgb(30, 30, 30)))));
+    content.push(Line::from(vec![
+        Span::styled(" [ SYSTEM LOG ]: ", Style::default().fg(Color::DarkGray)),
+        Span::styled("ESC to close │ ENTER to acknowledge", Style::default().fg(COLOR_CYAN)),
+    ]));
 
     let popup = Paragraph::new(content)
         .block(
             Block::default()
-                .title(format!(
-                    " Finding Detail [{}/{}] ",
-                    state.selected_finding + 1,
-                    exploits.len()
-                ))
+                .title(" AUDIT INTELLIGENCE CORE ")
                 .borders(Borders::ALL)
+                .border_type(ratatui::widgets::BorderType::Thick)
                 .border_style(Style::default().fg(severity_color)),
         )
         .wrap(Wrap { trim: true });

@@ -1,0 +1,17 @@
+[package]
+name = "shanon-verify"
+version.workspace = true
+edition.workspace = true
+description = "Full program verification: bytecode-source matching + security analysis + authority checks"
+
+[dependencies]
+program-analyzer = { path = "../program-analyzer" }
+compliance-reporter = { path = "../compliance-reporter" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+thiserror = { workspace = true }
+solana-client = { workspace = true }
+solana-sdk = { workspace = true }
+walkdir = { workspace = true }
+syn = { workspace = true }

@@ -2,16 +2,16 @@
 resolver = "2"
 
 members = [
-    "programs/exploit-registry",
+    "programs/shanon-oracle",
     "programs/vulnerable-vault",
     "programs/vulnerable-token",
     "programs/vulnerable-staking",
-    "programs/security_shield",
+    "crates/shanon-api",
     "crates/program-analyzer",
     "crates/llm-strategist",
     "crates/transaction-forge",
     "crates/orchestrator",
-    "crates/hackathon-client",
+
     "crates/secure-code-gen",
     "crates/attack-simulator",
     "crates/defi-security-expert",
@@ -44,22 +44,35 @@ members = [
     "crates/geiger-analyzer",
     "crates/anchor-security-analyzer",
     "crates/firedancer-monitor",
-    "crates/api-server",
+    "crates/crux-mir-analyzer",
+    "crates/fv-layer1-verifier",
+    "crates/fv-layer2-verifier",
+    "crates/fv-layer3-verifier",
+    "crates/fv-layer4-verifier",
+    "crates/fv-scanner-core",
+    "crates/fv-web-server",
+    "crates/shanon-guard",
+    "crates/shanon-monitor",
+    "crates/shanon-lsp",
+    "crates/compliance-reporter",
+    "crates/shanon-verify",
+    "crates/shanon-cli",
     "exploits",
+    "integration-tests",
 ]
 
 # Default members exclude Z3-dependent crates which require system z3 libraries
 default-members = [
-    "programs/exploit-registry",
+    "programs/shanon-oracle",
     "programs/vulnerable-vault",
     "programs/vulnerable-token",
     "programs/vulnerable-staking",
-    "programs/security_shield",
+    "crates/shanon-api",
     "crates/program-analyzer",
     "crates/llm-strategist",
     "crates/transaction-forge",
     "crates/orchestrator",
-    "crates/hackathon-client",
+
     "crates/secure-code-gen",
     "crates/attack-simulator",
     "crates/defi-security-expert",
@@ -84,8 +97,17 @@ default-members = [
     "crates/geiger-analyzer",
     "crates/anchor-security-analyzer",
     "crates/firedancer-monitor",
-    "crates/api-server",
+    "crates/crux-mir-analyzer",
+    "crates/fv-layer1-verifier",
+    "crates/fv-layer2-verifier",
+    "crates/fv-layer3-verifier",
+    "crates/fv-layer4-verifier",
+    "crates/fv-scanner-core",
+    "crates/fv-web-server",
+    "crates/shanon-guard",
+    "crates/shanon-cli",
     "exploits",
+    "integration-tests",
 ]
 
 
@@ -94,6 +116,18 @@ version = "0.1.0"
 edition = "2021"
 license = "MIT"
 authors = ["Antigravity <agent@solana-security.com>"]
+
+[workspace.lints.rust]
+# Anchor macros inject cfg values (anchor-debug, solana, no-idl, etc.) that
+# rustc doesn't recognise — suppress these warnings workspace-wide.
+unexpected_cfgs = { level = "allow", check-cfg = [
+    'cfg(anchor_debug)',
+    'cfg(solana)',
+    'cfg(no_idl)',
+    'cfg(no_log_ix_name)',
+    'cfg(custom_heap)',
+    'cfg(custom_panic)',
+] }
 
 [workspace.dependencies]
 # Solana & Anchor
@@ -139,10 +173,22 @@ tera = "1.19"
 uuid = { version = "1.6", features = ["v4"] }
 chrono = { version = "0.4", features = ["serde"] }
 colored = "2.1"
+log = "0.4"
+strsim = "0.11"
+toml = "0.8"
+semver = "1.0"
+criterion = { version = "0.5", features = ["html_reports"] }
+
+# Web framework
+actix-web = "4"
+actix-cors = "0.6"
+actix-files = "0.6"
+env_logger = "0.10"
+futures = "0.3"
 
 # Logging
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 
 [profile.release]
 overflow-checks = true

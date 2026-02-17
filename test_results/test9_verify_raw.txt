@@ -1,0 +1,75 @@
+  🔍 Running full verification for JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4...
+
+{
+  "program_id": "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4",
+  "program_name": "vulnerable-vault",
+  "tier": "Unverified",
+  "tier_label": "UNVERIFIED",
+  "verified_at": "2026-02-16T22:09:46.707093966+00:00",
+  "source_verification": {
+    "verified": true,
+    "method": "source-analysis",
+    "details": "216 Rust files analyzed, 0 parse errors. Full bytecode matching requires solana-verify CLI."
+  },
+  "authority_check": {
+    "is_upgradeable": true,
+    "upgrade_authority": "4Ec7ZxZS6Sbdg5UGSLHbAnM7GQHp2eFd4KYWRexAipQT",
+    "authority_revoked": false,
+    "risk_level": "ELEVATED"
+  },
+  "security_summary": {
+    "total_findings": 7,
+    "critical_count": 1,
+    "high_count": 3,
+    "medium_count": 3,
+    "low_count": 0,
+    "security_score": 15,
+    "top_findings": [
+      {
+        "id": "SOL-012",
+        "vuln_type": "Account Data Mismatch",
+        "severity": "HIGH",
+        "description": "An instruction takes both a state account (vault/pool) and an authority/user account, but does not validate their relationship. Without `has_one = authority` or an equivalent constraint, an attacker can pass any vault with any authority — even one they control — to access someone else's funds."
+      },
+      {
+        "id": "SOL-039",
+        "vuln_type": "Rounding Direction Error",
+        "severity": "MEDIUM",
+        "description": "Rounding direction may favor attacker."
+      },
+      {
+        "id": "SOL-001",
+        "vuln_type": "Missing Signer Check",
+        "severity": "CRITICAL",
+        "description": "An authority/admin/owner account is passed as raw `AccountInfo<'info>` without enforcing `is_signer`. The Solana runtime will NOT check this — any pubkey can be passed, allowing anyone to impersonate the privileged role. Use `Signer<'info>` or add `#[account(signer)]` to enforce the runtime check."
+      },
+      {
+        "id": "SOL-059",
+        "vuln_type": "Missing State Machine",
+        "severity": "HIGH",
+        "description": "Multi-step instruction flow (init→deposit→finalize) lacks a state machine to enforce ordering. Instructions can be called out-of-order, skipping required preconditions."
+      },
+      {
+        "id": "SOL-033",
+        "vuln_type": "Missing Slippage Protection",
+        "severity": "HIGH",
+        "description": "Swap operation without slippage protection."
+      },
+      {
+        "id": "SOL-051",
+        "vuln_type": "Missing Deadline Check",
+        "severity": "MEDIUM",
+        "description": "Transaction has no expiry deadline."
+      },
+      {
+        "id": "SOL-066",
+        "vuln_type": "Insufficient MEV Protection",
+        "severity": "MEDIUM",
+        "description": "DeFi swap/trade instruction lacks slippage protection and MEV mitigation. Transactions are vulnerable to sandwich attacks where a searcher front-runs and back-runs the user's trade for profit."
+      }
+    ]
+  },
+  "compliance_score": 83,
+  "compliance_framework": "SOC 2 Type II",
+  "badge_svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"280\" height=\"28\" role=\"img\" aria-label=\"Shanon: UNVERIFIED\"><title>Shanon Verification: vulnerable-vault - UNVERIFIED</title><linearGradient id=\"s\" x2=\"0\" y2=\"100%\"><stop offset=\"0\" stop-color=\"#bbb\" stop-opacity=\".1\"/><stop offset=\"1\" stop-opacity=\".1\"/></linearGradient><clipPath id=\"r\"><rect width=\"280\" height=\"28\" rx=\"5\" fill=\"#fff\"/></clipPath><g clip-path=\"url(#r)\"><rect width=\"100\" height=\"28\" fill=\"#333\"/><rect x=\"100\" width=\"180\" height=\"28\" fill=\"#808080\"/><rect width=\"280\" height=\"28\" fill=\"url(#s)\"/></g><g fill=\"#fff\" text-anchor=\"middle\" font-family=\"Verdana,Geneva,sans-serif\" font-size=\"11\"><text x=\"50\" y=\"19\" fill=\"#fff\">shanon</text><text x=\"190\" y=\"19\" fill=\"#333\">UNVERIFIED · 15/100</text></g></svg>"
+}

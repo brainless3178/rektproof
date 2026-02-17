@@ -9,37 +9,19 @@ use anchor_lang::prelude::*;
 /// Fuzz account storage for the fuzzing campaign.
 #[derive(Default)]
 pub struct FuzzAccounts {
-    pub authority: AccountId,
-    pub config: AccountId,
-    pub system_program: AccountId,
-    pub source: AccountId,
-    pub destination: AccountId,
-    pub mint: AccountId,
-    pub token_program: AccountId,
-    pub pool: AccountId,
-    pub user_source: AccountId,
-    pub user_destination: AccountId,
-    pub pool_source: AccountId,
-    pub pool_token_out: AccountId,
-    pub user: AccountId,
-    pub pyth_price_feed: AccountId,
-    pub switchboard_feed: AccountId,
-    pub price_state: AccountId,
-    pub token_mint: AccountId,
     pub vault: AccountId,
-    pub user_shares: AccountId,
-    pub user_token: AccountId,
-    pub vault_token: AccountId,
-    pub escrow: AccountId,
-    pub emergency_state: AccountId,
-    pub admin: AccountId,
+    pub authority: AccountId,
+    pub payer: AccountId,
+    pub system_program: AccountId,
+    pub depositor: AccountId,
+    pub oracle: AccountId,
     pub caller: AccountId,
-    pub mint_in: AccountId,
-    pub mint_out: AccountId,
     pub proposal: AccountId,
-    pub owner: AccountId,
-    pub proposer: AccountId,
-    pub signer: AccountId,
+    pub voter: AccountId,
+    pub user_account: AccountId,
+    pub user: AccountId,
+    pub source_vault: AccountId,
+    pub dest_vault: AccountId,
 }
 
 #[derive(Default)]
@@ -56,236 +38,89 @@ impl FuzzTest {
         let mut tx = InitializeTransaction::build(&mut self.trident, &mut self.fuzz_accounts);
         self.trident.execute_transaction(&mut tx, Some("initialize"));
 
-        // Initialize via 'create_voting_escrow'
-        let mut tx = CreateVotingEscrowTransaction::build(&mut self.trident, &mut self.fuzz_accounts);
-        self.trident.execute_transaction(&mut tx, Some("create_voting_escrow"));
-
-        // Initialize via 'initialize_emergency_state'
-        let mut tx = InitializeEmergencyStateTransaction::build(&mut self.trident, &mut self.fuzz_accounts);
-        self.trident.execute_transaction(&mut tx, Some("initialize_emergency_state"));
-
-        // Initialize via 'initialize_vault'
-        let mut tx = InitializeVaultTransaction::build(&mut self.trident, &mut self.fuzz_accounts);
-        self.trident.execute_transaction(&mut tx, Some("initialize_vault"));
-
-        // Initialize via 'initialize_user_shares'
-        let mut tx = InitializeUserSharesTransaction::build(&mut self.trident, &mut self.fuzz_accounts);
-        self.trident.execute_transaction(&mut tx, Some("initialize_user_shares"));
-
-        // Initialize via 'initialize_price_state'
-        let mut tx = InitializePriceStateTransaction::build(&mut self.trident, &mut self.fuzz_accounts);
-        self.trident.execute_transaction(&mut tx, Some("initialize_price_state"));
-
-        // Initialize via 'initialize_pool'
-        let mut tx = InitializePoolTransaction::build(&mut self.trident, &mut self.fuzz_accounts);
-        self.trident.execute_transaction(&mut tx, Some("initialize_pool"));
-
-        // Initialize via 'create_proposal'
-        let mut tx = CreateProposalTransaction::build(&mut self.trident, &mut self.fuzz_accounts);
-        self.trident.execute_transaction(&mut tx, Some("create_proposal"));
+        // Initialize via 'create_user_account'
+        let mut tx = CreateUserAccountTransaction::build(&mut self.trident, &mut self.fuzz_accounts);
+        self.trident.execute_transaction(&mut tx, Some("create_user_account"));
 
     }
 
-    /// Fuzz flow for instruction 'verify_transfer_amount'
+    /// Fuzz flow for instruction 'handle_deposit'
     #[flow]
-    fn flow_verify_transfer_amount(&mut self) {
-        let mut tx = VerifyTransferAmountTransaction::build(
+    fn flow_handle_deposit(&mut self) {
+        let mut tx = HandleDepositTransaction::build(
             &mut self.trident,
             &mut self.fuzz_accounts,
         );
         tx.set_amount(rand::random::<u64>());
-        tx.set_decimals(rand::random::<u8>());
-        self.trident.execute_transaction(&mut tx, Some("verify_transfer_amount"));
-
-        // Property: balance conservation check
-        // assert!(pre_balance >= post_balance || authorized_mint);
+        self.trident.execute_transaction(&mut tx, Some("handle_deposit"));
 
         // Property: no arithmetic overflow
         // Trident monitors for panics from unchecked math
     }
 
-    /// Fuzz flow for instruction 'swap_with_protection'
+    /// Fuzz flow for instruction 'handle_withdraw'
     #[flow]
-    fn flow_swap_with_protection(&mut self) {
-        let mut tx = SwapWithProtectionTransaction::build(
-            &mut self.trident,
-            &mut self.fuzz_accounts,
-        );
-        tx.set_amount_in(rand::random::<u64>());
-        tx.set_min_out(rand::random::<u64>());
-        tx.set_deadline(rand::random::<i64>());
-        self.trident.execute_transaction(&mut tx, Some("swap_with_protection"));
-
-        // Property: no arithmetic overflow
-        // Trident monitors for panics from unchecked math
-    }
-
-    /// Fuzz flow for instruction 'get_secure_price'
-    #[flow]
-    fn flow_get_secure_price(&mut self) {
-        let mut tx = GetSecurePriceTransaction::build(
-            &mut self.trident,
-            &mut self.fuzz_accounts,
-        );
-        self.trident.execute_transaction(&mut tx, Some("get_secure_price"));
-
-        // Property: no arithmetic overflow
-        // Trident monitors for panics from unchecked math
-    }
-
-    /// Fuzz flow for instruction 'deposit'
-    #[flow]
-    fn flow_deposit(&mut self) {
-        let mut tx = DepositTransaction::build(
+    fn flow_handle_withdraw(&mut self) {
+        let mut tx = HandleWithdrawTransaction::build(
             &mut self.trident,
             &mut self.fuzz_accounts,
         );
         tx.set_amount(rand::random::<u64>());
-        self.trident.execute_transaction(&mut tx, Some("deposit"));
+        self.trident.execute_transaction(&mut tx, Some("handle_withdraw"));
 
         // Property: no arithmetic overflow
         // Trident monitors for panics from unchecked math
     }
 
-    /// Fuzz flow for instruction 'emergency_pause'
+    /// Fuzz flow for instruction 'handle_get_secure_price'
     #[flow]
-    fn flow_emergency_pause(&mut self) {
-        let mut tx = EmergencyPauseTransaction::build(
+    fn flow_handle_get_secure_price(&mut self) {
+        let mut tx = HandleGetSecurePriceTransaction::build(
             &mut self.trident,
             &mut self.fuzz_accounts,
         );
-        tx.set_reason(format!("fuzz_{}", rand::random::<u32>()));
-        tx.set_duration(rand::random::<i64>());
-        self.trident.execute_transaction(&mut tx, Some("emergency_pause"));
+        self.trident.execute_transaction(&mut tx, Some("handle_get_secure_price"));
 
         // Property: no arithmetic overflow
         // Trident monitors for panics from unchecked math
     }
 
-    /// Fuzz flow for instruction 'unpause'
+    /// Fuzz flow for instruction 'handle_emergency_pause'
     #[flow]
-    fn flow_unpause(&mut self) {
-        let mut tx = UnpauseTransaction::build(
+    fn flow_handle_emergency_pause(&mut self) {
+        let mut tx = HandleEmergencyPauseTransaction::build(
             &mut self.trident,
             &mut self.fuzz_accounts,
         );
-        self.trident.execute_transaction(&mut tx, Some("unpause"));
+        self.trident.execute_transaction(&mut tx, Some("handle_emergency_pause"));
 
         // Property: no arithmetic overflow
         // Trident monitors for panics from unchecked math
     }
 
-    /// Fuzz flow for instruction 'withdraw'
+    /// Fuzz flow for instruction 'handle_vote_on_proposal'
     #[flow]
-    fn flow_withdraw(&mut self) {
-        let mut tx = WithdrawTransaction::build(
+    fn flow_handle_vote_on_proposal(&mut self) {
+        let mut tx = HandleVoteOnProposalTransaction::build(
             &mut self.trident,
             &mut self.fuzz_accounts,
         );
-        tx.set_shares(rand::random::<u64>());
-        self.trident.execute_transaction(&mut tx, Some("withdraw"));
+        tx.set_vote_weight(rand::random::<u64>());
+        self.trident.execute_transaction(&mut tx, Some("handle_vote_on_proposal"));
 
         // Property: no arithmetic overflow
         // Trident monitors for panics from unchecked math
     }
 
-    /// Fuzz flow for instruction 'reset_circuit_breaker'
+    /// Fuzz flow for instruction 'handle_swap'
     #[flow]
-    fn flow_reset_circuit_breaker(&mut self) {
-        let mut tx = ResetCircuitBreakerTransaction::build(
-            &mut self.trident,
-            &mut self.fuzz_accounts,
-        );
-        self.trident.execute_transaction(&mut tx, Some("reset_circuit_breaker"));
-
-        // Property: no arithmetic overflow
-        // Trident monitors for panics from unchecked math
-    }
-
-    /// Fuzz flow for instruction 'vote_on_proposal'
-    #[flow]
-    fn flow_vote_on_proposal(&mut self) {
-        let mut tx = VoteOnProposalTransaction::build(
-            &mut self.trident,
-            &mut self.fuzz_accounts,
-        );
-        tx.set_proposal_id(rand::random::<u64>());
-        tx.set_vote(rand::random::<bool>());
-        self.trident.execute_transaction(&mut tx, Some("vote_on_proposal"));
-
-        // Property: no arithmetic overflow
-        // Trident monitors for panics from unchecked math
-    }
-
-    /// Fuzz flow for instruction 'extend_lock'
-    #[flow]
-    fn flow_extend_lock(&mut self) {
-        let mut tx = ExtendLockTransaction::build(
-            &mut self.trident,
-            &mut self.fuzz_accounts,
-        );
-        tx.set_additional_duration(rand::random::<i64>());
-        self.trident.execute_transaction(&mut tx, Some("extend_lock"));
-
-        // Property: no arithmetic overflow
-        // Trident monitors for panics from unchecked math
-    }
-
-    /// Fuzz flow for instruction 'withdraw_from_escrow'
-    #[flow]
-    fn flow_withdraw_from_escrow(&mut self) {
-        let mut tx = WithdrawFromEscrowTransaction::build(
-            &mut self.trident,
-            &mut self.fuzz_accounts,
-        );
-        self.trident.execute_transaction(&mut tx, Some("withdraw_from_escrow"));
-
-        // Property: no arithmetic overflow
-        // Trident monitors for panics from unchecked math
-    }
-
-    /// Fuzz flow for instruction 'execute_proposal'
-    #[flow]
-    fn flow_execute_proposal(&mut self) {
-        let mut tx = ExecuteProposalTransaction::build(
-            &mut self.trident,
-            &mut self.fuzz_accounts,
-        );
-        tx.set__proposal_id(rand::random::<u64>());
-        self.trident.execute_transaction(&mut tx, Some("execute_proposal"));
-
-        // Property: no arithmetic overflow
-        // Trident monitors for panics from unchecked math
-    }
-
-    /// Fuzz flow for instruction 'handle_transfer_with_fee_check'
-    #[flow]
-    fn flow_handle_transfer_with_fee_check(&mut self) {
-        let mut tx = HandleTransferWithFeeCheckTransaction::build(
+    fn flow_handle_swap(&mut self) {
+        let mut tx = HandleSwapTransaction::build(
             &mut self.trident,
             &mut self.fuzz_accounts,
         );
         tx.set_amount(rand::random::<u64>());
-        tx.set_decimals(rand::random::<u8>());
-        tx.set__destination_account(Default::default() /* & mut InterfaceAccount < 'info , TokenAccount > */);
-        self.trident.execute_transaction(&mut tx, Some("handle_transfer_with_fee_check"));
-
-        // Property: balance conservation check
-        // assert!(pre_balance >= post_balance || authorized_mint);
-
-        // Property: no arithmetic overflow
-        // Trident monitors for panics from unchecked math
-    }
-
-    /// Fuzz flow for instruction 'handle_auto_pause'
-    #[flow]
-    fn flow_handle_auto_pause(&mut self) {
-        let mut tx = HandleAutoPauseTransaction::build(
-            &mut self.trident,
-            &mut self.fuzz_accounts,
-        );
-        tx.set__exploit_id(Pubkey::new_unique());
-        self.trident.execute_transaction(&mut tx, Some("handle_auto_pause"));
+        self.trident.execute_transaction(&mut tx, Some("handle_swap"));
 
         // Property: no arithmetic overflow
         // Trident monitors for panics from unchecked math

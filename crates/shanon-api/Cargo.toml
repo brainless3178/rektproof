@@ -1,0 +1,46 @@
+[package]
+name = "shanon-api"
+version = "0.1.0"
+description = "Shanon Security Oracle — REST API & Scanner Pipeline"
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "shanon-api"
+path = "src/main.rs"
+
+[dependencies]
+# Web framework
+actix-web = { workspace = true }
+actix-cors = { workspace = true }
+env_logger = { workspace = true }
+
+# Solana
+solana-sdk = { workspace = true }
+solana-client = { workspace = true }
+solana-account-decoder = { workspace = true }
+anchor-lang = { workspace = true }
+
+# Internal crates
+shanon-oracle = { path = "../../programs/shanon-oracle", features = ["no-entrypoint"] }
+token-security-expert = { path = "../token-security-expert" }
+program-analyzer = { path = "../program-analyzer" }
+shanon-guard = { path = "../shanon-guard" }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+borsh = { workspace = true }
+
+# Async
+tokio = { workspace = true }
+reqwest = { workspace = true }
+
+# Utilities
+anyhow = { workspace = true }
+chrono = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+bs58 = { workspace = true }
+sha2 = { workspace = true }
+tempfile = "3"

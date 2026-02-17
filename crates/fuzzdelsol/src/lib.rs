@@ -143,30 +143,64 @@ impl FuzzDelSol {
     }
 
     /// Find the compiled .so binary for a Solana program.
+    ///
+    /// Searches in order:
+    /// 1. `<program_path>/target/deploy/`
+    /// 2. `<workspace_root>/target/deploy/` (Anchor workspaces place .so here)
     pub fn find_binary(program_path: &Path) -> Result<std::path::PathBuf, FuzzDelSolError> {
-        // Look for .so file in target/deploy/
+        // 1. Check program-local target/deploy
         let deploy_dir = program_path.join("target").join("deploy");
-        if !deploy_dir.exists() {
-            return Err(FuzzDelSolError::BinaryNotFound(format!(
-                "Deploy directory not found: {:?}. Run `cargo build-sbf` first.",
-                deploy_dir
-            )));
+        if let Some(so) = Self::find_so_in_dir(&deploy_dir) {
+            return Ok(so);
         }
 
-        // Find .so file
-        for entry in std::fs::read_dir(&deploy_dir).map_err(FuzzDelSolError::IoError)? {
-            let entry = entry.map_err(FuzzDelSolError::IoError)?;
-            let path = entry.path();
-            if path.extension().and_then(|s| s.to_str()) == Some("so") {
-                info!("FuzzDelSol: Found binary: {:?}", path);
-                return Ok(path);
+        // 2. Walk up to find workspace root and check there
+        if let Some(root) = Self::find_workspace_root(program_path) {
+            let ws_deploy = root.join("target").join("deploy");
+            if let Some(so) = Self::find_so_in_dir(&ws_deploy) {
+                info!("FuzzDelSol: Found binary in workspace root: {:?}", so);
+                return Ok(so);
             }
         }
 
         Err(FuzzDelSolError::BinaryNotFound(format!(
-            "No .so file found in {:?}. Run `cargo build-sbf` first.",
-            deploy_dir
+            "No .so file found for {:?}. Run `cargo build-sbf` first.",
+            program_path,
         )))
+    }
+
+    /// Scan a directory for .so files.
+    fn find_so_in_dir(dir: &Path) -> Option<std::path::PathBuf> {
+        if !dir.exists() { return None; }
+        for entry in std::fs::read_dir(dir).ok()? {
+            let entry = entry.ok()?;
+            let path = entry.path();
+            if path.extension().and_then(|s| s.to_str()) == Some("so") {
+                info!("FuzzDelSol: Found binary: {:?}", path);
+                return Some(path);
+            }
+        }
+        None
+    }
+
+    /// Walk up parent directories to find workspace root (Anchor.toml or [workspace]).
+    fn find_workspace_root(start: &Path) -> Option<std::path::PathBuf> {
+        let mut current = start.to_path_buf();
+        for _ in 0..5 {
+            if current.join("Anchor.toml").exists() {
+                return Some(current);
+            }
+            let cargo_toml = current.join("Cargo.toml");
+            if cargo_toml.exists() {
+                if let Ok(content) = std::fs::read_to_string(&cargo_toml) {
+                    if content.contains("[workspace]") {
+                        return Some(current);
+                    }
+                }
+            }
+            if !current.pop() { break; }
+        }
+        None
     }
 }
 

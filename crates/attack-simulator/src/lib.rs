@@ -816,6 +816,7 @@ mod tests {
             real_world_incident: None,
             secure_fix: "Use checked_add".to_string(),
             prevention: "Fix it".to_string(),
+            confidence: 50,
         }
     }
 

@@ -615,6 +615,7 @@ mod tests {
             real_world_incident: None,
             secure_fix: "Use checked_add".to_string(),
             prevention: "Always use checked math".to_string(),
+            confidence: 50,
         };
         let prompt = s.build_exploit_prompt(&vuln, "pub fn deposit() {}");
         assert!(prompt.contains("Integer Overflow"));

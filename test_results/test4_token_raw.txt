@@ -1,0 +1,29 @@
+  🔍 Analyzing token JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN...
+
+{
+  "mint_address": "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN",
+  "risk_score": 7,
+  "grade": "A+",
+  "on_chain_checks": {
+    "supply": 0,
+    "decimals": 0,
+    "mint_authority": null,
+    "freeze_authority": null,
+    "is_upgradeable": false,
+    "upgrade_authority": null,
+    "top_holder_concentration": 0.0,
+    "liquidity_locked": false,
+    "liquidity_lock_duration": null
+  },
+  "risk_flags": {
+    "can_mint": false,
+    "can_freeze": false,
+    "is_upgradeable": false,
+    "concentrated_supply": false,
+    "no_liquidity_lock": true,
+    "short_liquidity_lock": false
+  },
+  "source_code_findings": [],
+  "rug_probability": 0.07,
+  "summary": "Token Risk Analysis for JUPyiwrY\nRisk Score: 7/100 (LOW RISK)\nRug Probability: 7%\nRed Flags: 1/6\n\n⚠ No liquidity lock detected"
+}

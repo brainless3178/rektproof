@@ -21,14 +21,13 @@ llm-strategist = { path = "../llm-strategist" }
 ai-enhancer = { path = "../ai-enhancer" }
 transaction-forge = { path = "../transaction-forge" }
 fxhash = "0.2.1"
-hackathon-client = { path = "../hackathon-client" }
 attack-simulator = { path = "../attack-simulator" }
 defi-security-expert = { path = "../defi-security-expert" }
 token-security-expert = { path = "../token-security-expert" }
 account-security-expert = { path = "../account-security-expert" }
 arithmetic-security-expert = { path = "../arithmetic-security-expert" }
 integration-orchestrator = { path = "../integration-orchestrator" }
-exploit-registry = { path = "../../programs/exploit-registry", features = ["cpi", "no-entrypoint"] }
+shanon-oracle = { path = "../../programs/shanon-oracle", features = ["cpi", "no-entrypoint"] }
 
 # Advanced Analysis Crates (non-Z3)
 taint-analyzer = { path = "../taint-analyzer" }
@@ -45,6 +44,17 @@ sec3-analyzer = { path = "../sec3-analyzer" }
 l3x-analyzer = { path = "../l3x-analyzer" }
 geiger-analyzer = { path = "../geiger-analyzer" }
 anchor-security-analyzer = { path = "../anchor-security-analyzer" }
+crux-mir-analyzer = { path = "../crux-mir-analyzer" }
+
+# Formal Verification Pipeline
+fv-scanner-core = { path = "../fv-scanner-core" }
+
+# Analysis Enhancement Crates
+consensus-engine = { path = "../consensus-engine" }
+firedancer-monitor = { path = "../firedancer-monitor" }
+shanon-guard = { path = "../shanon-guard" }
+secure-code-gen = { path = "../secure-code-gen" }
+benchmark-suite = { path = "../benchmark-suite" }
 
 # Z3-dependent crates (optional)
 economic-verifier = { path = "../economic-verifier", optional = true }

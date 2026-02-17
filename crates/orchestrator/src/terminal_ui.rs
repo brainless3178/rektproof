@@ -54,6 +54,7 @@ pub fn print_banner() {
     );
     println!("  {}\n", format!("+{}+", "─".repeat(78)).bright_black());
 
+    print_engine_badges();
     print_badges();
     print_credits();
 }
@@ -82,7 +83,7 @@ pub fn print_bug() {
         r"                                          ▒░            ▒▒                                          ",
         r"                               ::.      @█▒@ ::.    .:. ░▒█#      .-:                               ",
         r"                               +@*+     %@===%@-    +@%+++░%    .=%@=                               ",
-        r"                                 *&*+     &&&%*:    -*&&&%     +*&*                                 ",
+        r"                                 *&*+     &&&&%*:    -*&&&%     +*&*                                 ",
         r"                                   █▒      .%░█#&&&&░█@&.      ▓▓                                   ",
         r"                                 *@+=     #@███░░██*#███@#     +*@*                                 ",
         r"                                 #█     %▒███@=░█+*▓@=░███▒%    :█#                                 ",
@@ -111,6 +112,29 @@ pub fn print_bug() {
         println!("{}", line.bright_red());
     }
     println!();
+}
+
+/// Display analysis engine badges
+pub fn print_engine_badges() {
+    let engines = [
+        ("PATTERN", "72+ rules", "bright_red"),
+        ("DEEP-AST", "syn::Visit", "bright_magenta"),
+        ("TAINT", "lattice flow", "bright_yellow"),
+        ("CFG", "dominators", "bright_cyan"),
+        ("INTERVAL", "abstract ℤ", "bright_green"),
+        ("ALIAS", "must-not-alias", "bright_blue"),
+    ];
+    print!("  ");
+    for (tag, label, _) in engines {
+        print!(
+            "{} ",
+            format!(" [{}:{}] ", tag, label)
+                .on_bright_black()
+                .bright_white()
+                .bold()
+        );
+    }
+    println!("\n");
 }
 
 fn print_badges() {
@@ -148,6 +172,26 @@ pub fn print_config_pro(rpc: &str, models: &[(String, bool, String)]) {
             status,
             name,
             reason.bright_black()
+        );
+    }
+    println!("  ╚═════════════════════════════════════════════════════════════════════╝");
+}
+
+/// Print analysis engine summary table
+pub fn print_engine_summary(engine_stats: &[(&str, usize, std::time::Duration)]) {
+    println!("\n  ╔══ Analysis Engine Summary ═══════════════════════════════════════════╗");
+    for (name, findings, duration) in engine_stats {
+        let status = if *findings > 0 {
+            format!("{} findings", findings).bright_red().bold()
+        } else {
+            "✓ clean".bright_green().bold()
+        };
+        println!(
+            "  ║  {:<24} │ {:>14} │ {:.2}s {:>20} ║",
+            name.bright_white(),
+            status,
+            duration.as_secs_f64(),
+            ""
         );
     }
     println!("  ╚═════════════════════════════════════════════════════════════════════╝");
@@ -457,6 +501,23 @@ pub fn print_statistics(
     println!("    * Medium:         {}", medium.to_string().blue());
     println!("    * Low:            {}", low.to_string().bright_black());
     println!("    * Scan Duration:  {:.2}s", duration.as_secs_f64());
+
+    // Severity bar
+    let bar_total = critical + high + medium + low;
+    if bar_total > 0 {
+        let bw: usize = 40;
+        let c = (critical * bw) / bar_total;
+        let h = (high * bw) / bar_total;
+        let m = (medium * bw) / bar_total;
+        let l = bw - c - h - m;
+        println!(
+            "    * Distribution:   {}{}{}{}",
+            "█".repeat(c).bright_red(),
+            "█".repeat(h).yellow(),
+            "█".repeat(m).blue(),
+            "█".repeat(l).bright_black(),
+        );
+    }
 }
 
 pub fn print_verdict(critical: usize, _high: usize, _medium: usize) {

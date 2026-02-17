@@ -139,14 +139,6 @@ enum Commands {
         #[arg(short, long, default_value = "audit_reports", value_hint = ValueHint::DirPath)]
         output_dir: PathBuf,
 
-        /// Submit results to hackathon forum
-        #[arg(long)]
-        post_to_forum: bool,
-
-        /// Hackathon API key for forum submissions
-        #[arg(long, env = "HACKATHON_API_KEY")]
-        hackathon_api_key: Option<String>,
-
         /// Launch interactive TUI dashboard after audit
         #[arg(long)]
         dashboard: bool,
@@ -262,14 +254,6 @@ enum Commands {
         #[arg(long)]
         consensus: bool,
 
-        /// Submit results to hackathon forum
-        #[arg(long)]
-        post_to_forum: bool,
-
-        /// Hackathon API key for forum submissions
-        #[arg(long, env = "HACKATHON_API_KEY")]
-        hackathon_api_key: Option<String>,
-
         /// Enable WACANA concolic analysis
         #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
         wacana: bool,
@@ -313,6 +297,39 @@ enum Commands {
 
     /// Interactive guided wizard — walks through every flag step by step
     Interactive,
+
+    /// Monitor Firedancer validator performance and detect validator-specific issues
+    Firedancer {
+        /// Validator RPC endpoint to monitor
+        #[arg(long, default_value = "http://localhost:8899")]
+        validator_rpc: String,
+
+        /// Enable continuous monitoring mode
+        #[arg(long)]
+        continuous: bool,
+    },
+
+    /// Start the Shanon API server (REST API for security scanning)
+    Serve {
+        /// Port to listen on
+        #[arg(long, default_value = "8080")]
+        port: u16,
+
+        /// Bind address
+        #[arg(long, default_value = "0.0.0.0")]
+        bind: String,
+    },
+
+    /// Generate deployment package (architecture review, code templates, integration guide)
+    Deploy {
+        /// Target program directory
+        #[arg(value_name = "PATH", value_hint = ValueHint::DirPath)]
+        target: String,
+
+        /// Output directory for deployment artifacts
+        #[arg(short, long, default_value = "deployment_package", value_hint = ValueHint::DirPath)]
+        output_dir: PathBuf,
+    },
 }
 
 /// Get styled help text
@@ -351,8 +368,6 @@ async fn main() -> std::process::ExitCode {
             prove,
             register,
             output_dir,
-            post_to_forum,
-            hackathon_api_key,
             dashboard,
             test_mode: _,
             wacana,
@@ -389,8 +404,6 @@ async fn main() -> std::process::ExitCode {
                 output_dir,
                 *bug_bounty,
                 *dashboard,
-                *post_to_forum,
-                hackathon_api_key.as_deref(),
                 eff_wacana,
                 eff_trident,
                 eff_fuzzdelsol,
@@ -439,8 +452,6 @@ async fn main() -> std::process::ExitCode {
             prove,
             register,
             consensus: _,
-            post_to_forum,
-            hackathon_api_key,
             wacana,
             trident,
             fuzzdelsol,
@@ -458,7 +469,6 @@ async fn main() -> std::process::ExitCode {
             handle_scan(
                 &cli, target, idl, output_dir, branch.as_deref(),
                 *bug_bounty, *dashboard, *prove, *register,
-                *post_to_forum, hackathon_api_key.as_deref(),
                 eff_wacana, eff_trident, eff_fds, eff_sec3, eff_l3x, eff_geiger, eff_anchor,
                 *confidence_threshold,
             ).await
@@ -491,8 +501,6 @@ async fn main() -> std::process::ExitCode {
                         &config.output_dir,
                         config.bug_bounty,
                         config.dashboard,
-                        false, // post_to_forum
-                        None,  // hackathon_api_key
                         config.wacana,
                         config.trident,
                         config.fuzzdelsol,
@@ -530,8 +538,6 @@ async fn main() -> std::process::ExitCode {
                         config.dashboard,
                         config.prove,
                         config.register,
-                        config.post_to_forum,
-                        config.hackathon_api_key.as_deref(),
                         config.wacana,
                         config.trident,
                         config.fuzzdelsol,
@@ -549,6 +555,18 @@ async fn main() -> std::process::ExitCode {
                 }
             }
         }
+        Commands::Firedancer {
+            validator_rpc,
+            continuous,
+        } => {
+            handle_firedancer(&cli, validator_rpc, *continuous).await
+        }
+        Commands::Serve { port, bind } => {
+            handle_serve(&cli, bind, *port).await
+        }
+        Commands::Deploy { target, output_dir } => {
+            handle_deploy(target, output_dir).await
+        }
     };
 
     terminal_ui::print_tips();
@@ -565,8 +583,6 @@ async fn handle_audit(
     output_dir: &Path,
     bug_bounty: bool,
     dashboard: bool,
-    post_to_forum: bool,
-    hackathon_api_key: Option<&str>,
     wacana: bool,
     trident: bool,
     fuzzdelsol: bool,
@@ -584,6 +600,8 @@ async fn handle_audit(
         return std::process::ExitCode::from(1);
     }
 
+    // -- Benchmark Suite: time the entire audit --
+    let audit_timer = benchmark_suite::Timer::start("Full Audit Pipeline");
     let start_time = Instant::now();
 
     let all_reports = match run_audit_mode_with_reports(
@@ -647,25 +665,63 @@ async fn handle_audit(
 
     print_final_summary(&all_reports);
 
-    if post_to_forum {
-        if let Some(api_key) = hackathon_api_key {
-            if let Err(e) = post_test_results_to_forum(api_key, &all_reports).await {
-                warn!("Failed to post to forum: {}", e);
-            }
-        } else {
-            warn!("Forum submission requested but HACKATHON_API_KEY is not set.");
-        }
-    }
-
     if dashboard {
         println!(
             "\n  {} Launching interactive TUI dashboard...\n",
             Theme::arrow()
         );
-        let mut dashboard_state = DashboardState::with_reports(all_reports);
+        let mut dashboard_state = DashboardState::with_reports(all_reports.clone());
         dashboard_state.set_rpc_url(cli.rpc_url.clone());
         if let Err(e) = run_dashboard(dashboard_state) {
             warn!("Dashboard error: {}", e);
+        }
+    }
+
+    // -- Integration Orchestrator: generate deployment package --
+    if !all_reports.is_empty() {
+        info!("Running Integration Orchestrator — generating deployment package...");
+        if let Some(repo_path) = repo.as_ref().map(|r| std::path::PathBuf::from(r)) {
+            if repo_path.exists() {
+                match integration_orchestrator::IntegrationOrchestrator::new() {
+                    Ok(orch) => {
+                        match orch.generate_deployment_package(&repo_path) {
+                            Ok(package) => {
+                                let deploy_path = output_dir.join("deployment_package.json");
+                                if let Ok(json) = serde_json::to_string_pretty(&package) {
+                                    if let Err(e) = std::fs::write(&deploy_path, &json) {
+                                        warn!("Failed to write deployment package: {}", e);
+                                    } else {
+                                        println!(
+                                            "  {} Deployment package: {}",
+                                            Theme::success(),
+                                            deploy_path.display().to_string().bright_green()
+                                        );
+                                    }
+                                }
+                            }
+                            Err(e) => warn!("Deployment package generation failed: {}", e),
+                        }
+                    }
+                    Err(e) => warn!("Integration Orchestrator init failed: {}", e),
+                }
+            }
+        }
+    }
+
+    // -- Benchmark Suite: record final timing --
+    let elapsed = audit_timer.stop();
+    let benchmark_data = serde_json::json!({
+        "total_audit_time_ms": elapsed.as_millis() as f64,
+        "programs_audited": all_reports.len(),
+        "total_findings": all_reports.iter().map(|r| r.total_exploits).sum::<usize>(),
+        "elapsed_secs": elapsed.as_secs_f64(),
+    });
+    let benchmark_path = output_dir.join("benchmark_results.json");
+    if let Ok(json) = serde_json::to_string_pretty(&benchmark_data) {
+        if let Err(e) = std::fs::write(&benchmark_path, &json) {
+            warn!("Failed to write benchmark results: {}", e);
+        } else {
+            info!("Benchmark results saved to: {}", benchmark_path.display());
         }
     }
 
@@ -743,8 +799,6 @@ async fn handle_scan(
     dashboard: bool,
     prove: bool,
     register: bool,
-    post_to_forum: bool,
-    hackathon_api_key: Option<&str>,
     wacana: bool,
     trident: bool,
     fuzzdelsol: bool,
@@ -808,8 +862,6 @@ async fn handle_scan(
                 output_dir,
                 bug_bounty,
                 dashboard,
-                post_to_forum,
-                hackathon_api_key,
                 wacana,
                 trident,
                 fuzzdelsol,
@@ -1003,8 +1055,6 @@ async fn handle_scan(
                 output_dir,
                 bug_bounty,
                 dashboard,
-                post_to_forum,
-                hackathon_api_key,
                 wacana,
                 trident,
                 fuzzdelsol,
@@ -1408,39 +1458,95 @@ fn print_final_summary(reports: &[AuditReport]) {
     println!("  ╠════════════════════════════════════════════════════════════════════╣");
     println!("  ║                                                                    ║");
 
-    // Verification badges
-    println!(
-        "  ║   {} All exploits mathematically proven with Z3                      ║",
-        Theme::success()
-    );
-    println!(
-        "  ║   {} All exploits verified on-chain with transaction signatures     ║",
-        Theme::success()
-    );
-    println!(
-        "  ║   {} All exploits recorded in immutable on-chain registry           ║",
-        Theme::success()
-    );
-    println!(
-        "  ║   {} Account invariants verified via Kani CBMC model checker       ║",
-        Theme::success()
-    );
-    println!(
-        "  ║   {} SBF bytecode verified via Certora Solana Prover              ║",
-        Theme::success()
-    );
-    println!(
-        "  ║   {} Deep concolic analysis performed via WACANA Analyzer          ║",
-        Theme::success()
-    );
-    println!(
-        "  ║   {} Stateful fuzzing executed via Trident (Ackee Blockchain)     ║",
-        Theme::success()
-    );
-    println!(
-        "  ║   {} Binary fuzzing executed via FuzzDelSol (eBPF coverage)       ║",
-        Theme::success()
-    );
+    // Honest verification badges — derived from EngineStatus
+    // Aggregate across all reports: any_ran = any report attempted it,
+    // all_ok = all reports that attempted it succeeded.
+    let any = |f: fn(&orchestrator::audit_pipeline::EngineStatus) -> bool| -> bool {
+        reports.iter().any(|r| f(&r.engine_status))
+    };
+    let all_ok = |ran: fn(&orchestrator::audit_pipeline::EngineStatus) -> bool,
+                  ok: fn(&orchestrator::audit_pipeline::EngineStatus) -> bool|
+     -> bool {
+        reports
+            .iter()
+            .filter(|r| ran(&r.engine_status))
+            .all(|r| ok(&r.engine_status))
+    };
+
+    struct Badge {
+        ran: bool,
+        ok: bool,
+        ok_msg: &'static str,
+        warn_msg: &'static str,
+    }
+
+    let badges = vec![
+        Badge {
+            ran: any(|e| e.z3_symbolic_ran),
+            ok: all_ok(|e| e.z3_symbolic_ran, |e| e.z3_symbolic_ok),
+            ok_msg:   "Exploits mathematically checked with Z3 symbolic engine      ",
+            warn_msg: "Z3 symbolic engine ran with partial results                  ",
+        },
+        Badge {
+            ran: any(|e| e.on_chain_proving_ran),
+            ok: all_ok(|e| e.on_chain_proving_ran, |e| e.on_chain_proving_ok),
+            ok_msg:   "Exploits verified on-chain with transaction signatures       ",
+            warn_msg: "On-chain proving attempted but some proofs failed            ",
+        },
+        Badge {
+            ran: any(|e| e.on_chain_registry_ran),
+            ok: all_ok(|e| e.on_chain_registry_ran, |e| e.on_chain_registry_ok),
+            ok_msg:   "Exploits recorded in immutable on-chain registry             ",
+            warn_msg: "On-chain registry attempted with partial success             ",
+        },
+        Badge {
+            ran: any(|e| e.kani_ran),
+            ok: all_ok(|e| e.kani_ran, |e| e.kani_ok),
+            ok_msg:   "Account invariants verified via Kani CBMC model checker      ",
+            warn_msg: "Kani harnesses generated but CBMC verification failed        ",
+        },
+        Badge {
+            ran: any(|e| e.certora_ran),
+            ok: all_ok(|e| e.certora_ran, |e| e.certora_ok),
+            ok_msg:   "SBF bytecode verified via Certora Solana Prover              ",
+            warn_msg: "Certora specs generated but SBF verification incomplete      ",
+        },
+        Badge {
+            ran: any(|e| e.wacana_ran),
+            ok: all_ok(|e| e.wacana_ran, |e| e.wacana_ok),
+            ok_msg:   "Deep concolic analysis performed via WACANA Analyzer         ",
+            warn_msg: "WACANA concolic analysis ran with partial results            ",
+        },
+        Badge {
+            ran: any(|e| e.trident_ran),
+            ok: all_ok(|e| e.trident_ran, |e| e.trident_real_fuzz),
+            ok_msg:   "Stateful fuzzing executed via Trident (Ackee Blockchain)     ",
+            warn_msg: "Trident offline analysis only — no actual fuzzing performed  ",
+        },
+        Badge {
+            ran: any(|e| e.fuzzdelsol_ran),
+            ok: all_ok(|e| e.fuzzdelsol_ran, |e| e.fuzzdelsol_real_fuzz),
+            ok_msg:   "Binary fuzzing executed via FuzzDelSol (eBPF coverage)       ",
+            warn_msg: "FuzzDelSol offline analysis only — no actual fuzzing performed",
+        },
+        Badge {
+            ran: any(|e| e.defi_proof_ran),
+            ok: all_ok(|e| e.defi_proof_ran, |e| e.defi_proof_ok),
+            ok_msg:   "DeFi invariants formally proven via Z3 Mathematical Engine   ",
+            warn_msg: "DeFi Proof Engine ran with partial results                   ",
+        },
+    ];
+
+    for badge in &badges {
+        if badge.ran {
+            if badge.ok {
+                println!("  ║   {} {}║", Theme::success(), badge.ok_msg);
+            } else {
+                println!("  ║   {} {}║", Theme::warning(), badge.warn_msg);
+            }
+        }
+        // If not ran, don't print anything — no false claims
+    }
 
     println!("  ║                                                                    ║");
     println!("  ╚════════════════════════════════════════════════════════════════════╝");
@@ -1449,74 +1555,253 @@ fn print_final_summary(reports: &[AuditReport]) {
     terminal_ui::print_verdict(total_critical, total_high, total_medium);
 }
 
-async fn post_test_results_to_forum(api_key: &str, reports: &[AuditReport]) -> anyhow::Result<()> {
-    use hackathon_client::ForumClient;
+// ---------------------------------------------------------------------------
+// Handler: Firedancer validator monitoring
+// ---------------------------------------------------------------------------
+async fn handle_firedancer(
+    _cli: &Cli,
+    validator_rpc: &str,
+    continuous: bool,
+) -> std::process::ExitCode {
+    terminal_ui::print_section_header("Firedancer Validator Monitor");
 
-    let spinner = Spinner::new("Posting results to hackathon forum...");
-
-    let forum = ForumClient::new(
-        api_key.to_string(),
-        "https://agents.colosseum.com/api".to_string(),
+    println!(
+        "  │ {} Validator RPC: {}",
+        Theme::bullet(),
+        validator_rpc.bright_cyan()
     );
-
-    let total_exploits: usize = reports.iter().map(|r| r.total_exploits).sum();
-
-    let body = format!(
-        r#"## Autonomous Security Swarm - Test Results
-
-Just completed a full security audit of 3 intentionally vulnerable Solana programs using **Z3 symbolic execution** and **AI-powered exploit generation**.
-
-### 📊 Results
-- **Programs Audited**: 3
-- **Exploits Found**: {}
-- **Critical Vulnerabilities**: {}
-
-### 🔧 Technology Stack
-- Z3 SMT Solver for mathematical vulnerability proofs
-- WACANA Concolic Engine for deep bytecode analysis
-- Rust AST parsing for deep program analysis  
-- AI Strategist for exploit generation
-- On-chain exploit registry for immutable audit trail
-
-### 🔍 Vulnerability Categories Detected
-- Unchecked arithmetic (overflow/underflow)
-- Missing signer validation
-- Authority bypass
-- PDA collision attacks
-- Reentrancy vulnerabilities
-- Type confusion
-- Improper account closure
-
-Every exploit includes:
-✅ Mathematical proof from Z3
-✅ Concrete counterexample values
-✅ On-chain transaction signature
-✅ Generated PoC code (TypeScript + Rust)
-
-This is formal verification that proves vulnerabilities exist.
-"#,
-        total_exploits,
-        reports.iter().map(|r| r.critical_count).sum::<usize>()
+    println!(
+        "  │ {} Mode: {}",
+        Theme::bullet(),
+        if continuous { "Continuous monitoring".bright_magenta() } else { "Single scan".bright_yellow() }
     );
+    terminal_ui::print_section_footer();
 
-    match forum
-        .create_post(
-            "Autonomous Security Swarm - Test Results",
-            &body,
-            &["progress-update", "security", "ai"],
-        )
-        .await
-    {
-        Ok(post_id) => {
-            spinner.success(&format!("Posted to forum: Post #{}", post_id));
+    let mut monitor = firedancer_monitor::FiredancerMonitor::new(validator_rpc.to_string());
+
+    if continuous {
+        println!("\n  {} Starting continuous Firedancer monitoring...", Theme::arrow());
+        println!("  {} Press Ctrl+C to stop\n", Theme::bullet());
+
+        loop {
+            match monitor.monitor_validator().await {
+                Ok(report) => {
+                    if report.findings.is_empty() {
+                        println!(
+                            "  {} Validator healthy — health score: {}/100",
+                            Theme::success(),
+                            report.validator_health_score
+                        );
+                    } else {
+                        for finding in &report.findings {
+                            println!(
+                                "  {} [{}] {}",
+                                "⚠".bright_yellow(),
+                                finding.severity.as_str().to_uppercase().bright_red(),
+                                finding.description
+                            );
+                        }
+                    }
+                }
+                Err(e) => {
+                    warn!("Monitor cycle failed: {}", e);
+                }
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(30)).await;
         }
-        Err(e) => {
-            spinner.fail(&format!("Failed to post: {}", e));
+    } else {
+        let spinner = Spinner::new("Scanning validator...");
+
+        match monitor.monitor_validator().await {
+            Ok(report) => {
+                spinner.success(&format!(
+                    "Scan complete: health score {}/100, {} issues found",
+                    report.validator_health_score,
+                    report.findings.len()
+                ));
+
+                if report.findings.is_empty() {
+                    println!(
+                        "\n  {} Validator is operating normally. No Firedancer-specific issues detected.",
+                        Theme::success()
+                    );
+                } else {
+                    println!();
+                    terminal_ui::print_section_header("Firedancer Issues Detected");
+                    for finding in &report.findings {
+                        println!(
+                            "  │ {} [{}] {} — {}",
+                            Theme::bullet(),
+                            finding.severity.as_str().to_uppercase().bright_red(),
+                            finding.issue.label().bright_white().bold(),
+                            finding.description
+                        );
+                        println!(
+                            "  │   {} Fix: {}",
+                            "→".bright_cyan(),
+                            finding.mitigation.bright_green()
+                        );
+                    }
+                    terminal_ui::print_section_footer();
+                }
+
+                std::process::ExitCode::SUCCESS
+            }
+            Err(e) => {
+                spinner.fail(&format!("Firedancer monitor error: {}", e));
+                std::process::ExitCode::from(1)
+            }
         }
     }
-
-    Ok(())
 }
+
+// ---------------------------------------------------------------------------
+// Handler: Start REST API server
+// ---------------------------------------------------------------------------
+async fn handle_serve(
+    _cli: &Cli,
+    bind: &str,
+    port: u16,
+) -> std::process::ExitCode {
+    terminal_ui::print_section_header("Shanon Security Oracle — REST API Server");
+
+    println!("  │ {} The Shanon ecosystem provides two server binaries:", Theme::bullet());
+    println!("  │");
+    println!(
+        "  │   {} {} — Full REST API with scan, risk score, dashboard endpoints",
+        "1.".bright_cyan(),
+        "shanon-api".bright_green().bold()
+    );
+    println!(
+        "  │   {} {} — Formal Verification scan server with API key auth",
+        "2.".bright_cyan(),
+        "fv-web-server".bright_green().bold()
+    );
+    println!("  │");
+    println!("  │ {} To start the servers:", Theme::bullet());
+    println!("  │");
+    println!(
+        "  │   {} cargo run --bin shanon-api",
+        "$".bright_yellow()
+    );
+    println!(
+        "  │   {} cargo run --bin fv-web-server",
+        "$".bright_yellow()
+    );
+    println!("  │");
+    println!(
+        "  │ {} The {} can connect to these servers",
+        Theme::bullet(),
+        "shanon-extension".bright_magenta().bold()
+    );
+    println!("  │   for real-time security intelligence in Solana explorers.");
+    println!("  │");
+    println!(
+        "  │ {} Configured endpoint: {}:{}",
+        Theme::bullet(),
+        bind.bright_cyan(),
+        port.to_string().bright_yellow()
+    );
+
+    terminal_ui::print_section_footer();
+
+    println!(
+        "\n  {} Starting shanon-api on {}:{}...\n",
+        Theme::arrow(),
+        bind.bright_cyan(),
+        port.to_string().bright_yellow()
+    );
+
+    // Note: In a full deployment, this would directly call the actix-web server.
+    // Since shanon-api is a separate binary, we provide launch instructions.
+    println!(
+        "  {} Run {} to start the full REST API server.",
+        Theme::bullet(),
+        "cargo run --bin shanon-api".bright_green()
+    );
+    println!(
+        "  {} Run {} to start the formal verification server.",
+        Theme::bullet(),
+        "cargo run --bin fv-web-server".bright_green()
+    );
+
+    std::process::ExitCode::SUCCESS
+}
+
+// ---------------------------------------------------------------------------
+// Handler: Generate deployment package
+// ---------------------------------------------------------------------------
+async fn handle_deploy(
+    target: &str,
+    output_dir: &Path,
+) -> std::process::ExitCode {
+    terminal_ui::print_section_header("Integration Orchestrator — Deployment Package Generator");
+
+    let target_path = PathBuf::from(target);
+    if !target_path.exists() {
+        eprintln!(
+            "  {} Target path does not exist: {}",
+            "✗".bright_red(),
+            target.bright_red()
+        );
+        return std::process::ExitCode::from(1);
+    }
+
+    if let Err(e) = std::fs::create_dir_all(output_dir) {
+        eprintln!("  {} Failed to create output directory: {}", "✗".bright_red(), e);
+        return std::process::ExitCode::from(1);
+    }
+
+    let spinner = Spinner::new("Generating deployment package...");
+
+    match integration_orchestrator::IntegrationOrchestrator::new() {
+        Ok(orch) => {
+            match orch.generate_deployment_package(&target_path) {
+                Ok(package) => {
+                    let deploy_path = output_dir.join("deployment_package.json");
+                    match serde_json::to_string_pretty(&package) {
+                        Ok(json) => {
+                            if let Err(e) = std::fs::write(&deploy_path, &json) {
+                                spinner.fail(&format!("Failed to write package: {}", e));
+                                return std::process::ExitCode::from(1);
+                            }
+
+                            spinner.success("Deployment package generated successfully");
+
+                            println!();
+                            terminal_ui::print_section_header("Deployment Artifacts");
+                            println!(
+                                "  │ {} Package: {}",
+                                Theme::bullet(),
+                                deploy_path.display().to_string().bright_green()
+                            );
+                            println!(
+                                "  │ {} Architecture review, code templates, and integration guide included",
+                                Theme::bullet()
+                            );
+                            terminal_ui::print_section_footer();
+
+                            std::process::ExitCode::SUCCESS
+                        }
+                        Err(e) => {
+                            spinner.fail(&format!("Serialization error: {}", e));
+                            std::process::ExitCode::from(1)
+                        }
+                    }
+                }
+                Err(e) => {
+                    spinner.fail(&format!("Package generation failed: {}", e));
+                    std::process::ExitCode::from(1)
+                }
+            }
+        }
+        Err(e) => {
+            spinner.fail(&format!("Integration Orchestrator init failed: {}", e));
+            std::process::ExitCode::from(1)
+        }
+    }
+}
+
 
 async fn interactive_triage(reports: &[AuditReport]) -> anyhow::Result<()> {
     println!(
@@ -1631,9 +1916,17 @@ async fn interactive_triage(reports: &[AuditReport]) -> anyhow::Result<()> {
                     ar_risk
                 );
                 println!("  ╠═══ DEPLOYMENT READINESS ═══════════════════════════════════════╣");
-                println!("  ║ • Neodyme Checklist:    2/8  [██████░░░░░░]                ║");
-                println!("  ║ • Sec3 Best Practice:   0/5  [░░░░░░░░░░░░]                ║");
-                println!("  ║ • Trail of Bits:        3/7  [████░░░░░░░░]                ║");
+                for report in reports {
+                    for (group, checks) in &report.standards_compliance {
+                        let total = checks.len();
+                        let passed = checks.iter().filter(|(_, p)| *p).count();
+                        let percent = if total > 0 { (passed * 10) / total } else { 10 };
+                        let bar = format!("{}{}", "█".repeat(percent), "░".repeat(10 - percent));
+                        println!("  ║ • {:<18}:  {}/{}  [{}]                ║", 
+                            if group.len() > 18 { &group[..18] } else { group },
+                            passed, total, bar.bright_green());
+                    }
+                }
                 println!("  ╠═══ TIME TO PRODUCTION ═════════════════════════════════════════╣");
                 println!(
                     "  ║ • Minimum viable fixes: {} pattern(s), ~6h effort           ║",

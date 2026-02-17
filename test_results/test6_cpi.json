@@ -1,0 +1,16 @@
+{
+  "nodes": {
+    "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4": {
+      "program_id": "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4",
+      "name": null,
+      "security_score": null,
+      "verified": true,
+      "is_upgradeable": false,
+      "in_degree": 0,
+      "out_degree": 0
+    }
+  },
+  "edges": [],
+  "root_program": "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4",
+  "depth": 1
+}

@@ -13,16 +13,24 @@ use std::collections::HashMap;
 use z3::ast::{Ast, Bool, BV};
 use z3::{Context, SatResult, Solver};
 
+pub mod advanced_proofs;
 pub mod constraint_builder;
 pub mod exploit_proof;
+pub mod proof_engine;
 pub mod solver;
 pub mod state_model;
 
+pub use advanced_proofs::{
+    AbstractInterpreter, AbstractOp, AdvancedProofResult, CraigInterpolator,
+    DeFiInstruction, FixedPointComputer, GameTheoreticAnalyzer, Interval,
+    KInductionProver, ProofAlgorithm, ProofVerdict, WeakestPreconditionCalculus,
+};
 pub use constraint_builder::ConstraintBuilder;
 pub use exploit_proof::{
     AccountValidationType, ArithmeticOpType, ExploitProof, ExploitReport, ImpactEstimate,
     VulnerabilityType,
 };
+pub use proof_engine::{ProofEngine, ProofResult, ProofClass, Counterexample};
 pub use solver::SymbolicSolver;
 pub use state_model::{
     StateEffect, StateTransition, SymbolicAccount, SymbolicInstructionContext, SymbolicState,
@@ -203,16 +211,21 @@ impl<'ctx> SymbolicEngine<'ctx> {
     pub fn check_logic_invariant(&mut self, property: &str) -> Option<ExploitProof> {
         self.solver.reset();
 
-        // Simple parser for property strings
-        let (left_var, op, right_var) = if property.contains("<=") {
-            let parts: Vec<&str> = property.split("<=").collect();
-            (parts[0].trim(), "<=", parts[1].trim())
-        } else if property.contains("==") {
-            let parts: Vec<&str> = property.split("==").collect();
-            (parts[0].trim(), "==", parts[1].trim())
-        } else {
-            return None;
-        };
+        let ops = ["<=", ">=", "==", "!=", "<", ">"];
+        let mut found_op = None;
+        for op in ops {
+            if property.contains(op) {
+                found_op = Some(op);
+                break;
+            }
+        }
+
+        let op = found_op?;
+        let parts: Vec<&str> = property.split(op).collect();
+        if parts.len() != 2 { return None; }
+        
+        let left_var = parts[0].trim();
+        let right_var = parts[1].trim();
 
         let left_bv = match self.state.get_variable(left_var) {
             Some(SymbolicValue::BitVec(bv)) => bv,
@@ -227,7 +240,11 @@ impl<'ctx> SymbolicEngine<'ctx> {
         // We want to prove the property is VIOLABLE, so we assert the NEGATION
         let violation_condition = match op {
             "<=" => left_bv.bvugt(right_bv),
+            ">=" => left_bv.bvult(right_bv),
             "==" => left_bv._eq(right_bv).not(),
+            "!=" => left_bv._eq(right_bv),
+            "<" => left_bv.bvuge(right_bv),
+            ">" => left_bv.bvule(right_bv),
             _ => return None,
         };
 

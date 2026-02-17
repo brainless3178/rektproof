@@ -179,11 +179,16 @@ impl RateLimiter {
         use std::time::Duration;
 
         let now = std::time::Instant::now();
-        let last = *self.last_reset.read().unwrap();
+        let last = match self.last_reset.read() {
+            Ok(l) => *l,
+            Err(_) => return true, // fail open on poison
+        };
 
         // Reset counter every minute
         if now.duration_since(last) > Duration::from_secs(60) {
-            *self.last_reset.write().unwrap() = now;
+            if let Ok(mut w) = self.last_reset.write() {
+                *w = now;
+            }
             self.request_count.store(0, Ordering::Relaxed);
         }
 

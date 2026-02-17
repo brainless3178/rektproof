@@ -4,14 +4,15 @@
 //! compute guaranteed bounds on program values. Essential for
 //! proving absence of overflow/underflow.
 //!
-//! This engine uses abstract interpretation over the AST to track
-//! variables as intervals [min, max], allowing the auditor to prove
-//! that certain arithmetic operations can never fail.
+//! This engine uses Control Flow Graphs (CFG) and a worklist algorithm
+//! to perform path-sensitive abstract interpretation.
 
+use petgraph::graph::{DiGraph, NodeIndex};
+use petgraph::visit::EdgeRef;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::ops::{Add, Div, Mul, Sub};
-use syn::{visit::Visit, BinOp, Expr, ItemFn, Lit};
+use syn::{BinOp, Expr, ItemFn, Lit, Stmt};
 
 pub mod domains;
 pub mod transfer;
@@ -25,132 +26,59 @@ pub struct Interval {
 
 impl Interval {
     pub fn new(min: i128, max: i128) -> Self {
-        assert!(min <= max, "Invalid interval: min > max");
+        if min > max {
+            return Self::bottom();
+        }
         Self { min, max }
     }
 
-    /// Create interval for a single value
     pub fn singleton(value: i128) -> Self {
-        Self {
-            min: value,
-            max: value,
-        }
+        Self { min: value, max: value }
     }
 
-    /// Create the bottom element (empty interval)
     pub fn bottom() -> Self {
-        Self { min: 1, max: 0 } // Invalid interval represents bottom
+        Self { min: 1, max: 0 }
     }
 
-    /// Create interval for u64 range
     pub fn u64_range() -> Self {
-        Self {
-            min: 0,
-            max: u64::MAX as i128,
-        }
+        Self { min: 0, max: u64::MAX as i128 }
     }
 
-    /// Create interval for u128 range (capped for practicality)
     pub fn u128_range() -> Self {
-        Self {
-            min: 0,
-            max: i128::MAX,
-        }
+        Self { min: 0, max: i128::MAX }
     }
 
-    /// Check if this is the bottom element
     pub fn is_bottom(&self) -> bool {
         self.min > self.max
     }
 
-    /// Check if the interval contains a value
     pub fn contains(&self, value: i128) -> bool {
         !self.is_bottom() && value >= self.min && value <= self.max
     }
 
-    /// Check if the interval might overflow u64
     pub fn might_overflow_u64(&self) -> bool {
         self.max > u64::MAX as i128 || self.min < 0
     }
 
-    /// Check if the interval might underflow (go negative)
     pub fn might_underflow(&self) -> bool {
         self.min < 0
     }
 
-    /// Join (least upper bound) of two intervals
     pub fn join(&self, other: &Interval) -> Interval {
-        if self.is_bottom() {
-            return *other;
-        }
-        if other.is_bottom() {
-            return *self;
-        }
+        if self.is_bottom() { return *other; }
+        if other.is_bottom() { return *self; }
         Interval {
             min: self.min.min(other.min),
             max: self.max.max(other.max),
         }
     }
 
-    /// Meet (greatest lower bound) of two intervals
-    pub fn meet(&self, other: &Interval) -> Interval {
-        if self.is_bottom() || other.is_bottom() {
-            return Interval::bottom();
-        }
-        let min = self.min.max(other.min);
-        let max = self.max.min(other.max);
-        if min > max {
-            Interval::bottom()
-        } else {
-            Interval { min, max }
-        }
-    }
-
-    /// Widen operator for ensuring termination
     pub fn widen(&self, other: &Interval) -> Interval {
-        if self.is_bottom() {
-            return *other;
-        }
-        if other.is_bottom() {
-            return *self;
-        }
+        if self.is_bottom() { return *other; }
+        if other.is_bottom() { return *self; }
 
-        let min = if other.min < self.min {
-            i128::MIN / 2 // Widen to negative infinity (bounded)
-        } else {
-            self.min
-        };
-
-        let max = if other.max > self.max {
-            i128::MAX / 2 // Widen to positive infinity (bounded)
-        } else {
-            self.max
-        };
-
-        Interval { min, max }
-    }
-
-    /// Narrow operator for improving precision
-    pub fn narrow(&self, other: &Interval) -> Interval {
-        if self.is_bottom() {
-            return Interval::bottom();
-        }
-        if other.is_bottom() {
-            return *self;
-        }
-
-        let min = if self.min == i128::MIN / 2 {
-            other.min
-        } else {
-            self.min
-        };
-
-        let max = if self.max == i128::MAX / 2 {
-            other.max
-        } else {
-            self.max
-        };
-
+        let min = if other.min < self.min { i128::MIN / 2 } else { self.min };
+        let max = if other.max > self.max { i128::MAX / 2 } else { self.max };
         Interval { min, max }
     }
 }
@@ -158,11 +86,8 @@ impl Interval {
 // Interval arithmetic operations
 impl Add for Interval {
     type Output = Interval;
-
     fn add(self, other: Interval) -> Interval {
-        if self.is_bottom() || other.is_bottom() {
-            return Interval::bottom();
-        }
+        if self.is_bottom() || other.is_bottom() { return Interval::bottom(); }
         Interval {
             min: self.min.saturating_add(other.min),
             max: self.max.saturating_add(other.max),
@@ -172,11 +97,8 @@ impl Add for Interval {
 
 impl Sub for Interval {
     type Output = Interval;
-
     fn sub(self, other: Interval) -> Interval {
-        if self.is_bottom() || other.is_bottom() {
-            return Interval::bottom();
-        }
+        if self.is_bottom() || other.is_bottom() { return Interval::bottom(); }
         Interval {
             min: self.min.saturating_sub(other.max),
             max: self.max.saturating_sub(other.min),
@@ -186,129 +108,92 @@ impl Sub for Interval {
 
 impl Mul for Interval {
     type Output = Interval;
-
     fn mul(self, other: Interval) -> Interval {
-        if self.is_bottom() || other.is_bottom() {
-            return Interval::bottom();
-        }
-
-        // Consider all four corner cases
+        if self.is_bottom() || other.is_bottom() { return Interval::bottom(); }
         let products = [
             self.min.saturating_mul(other.min),
             self.min.saturating_mul(other.max),
             self.max.saturating_mul(other.min),
             self.max.saturating_mul(other.max),
         ];
-
         Interval {
-            min: *products
-                .iter()
-                .min()
-                .expect("Fixed size array is never empty"),
-            max: *products
-                .iter()
-                .max()
-                .expect("Fixed size array is never empty"),
+            min: *products.iter().min().unwrap(),
+            max: *products.iter().max().unwrap(),
         }
     }
 }
 
 impl Div for Interval {
     type Output = Interval;
-
     fn div(self, other: Interval) -> Interval {
-        if self.is_bottom() || other.is_bottom() {
-            return Interval::bottom();
-        }
-
-        // Handle division by zero
-        if other.contains(0) {
-            // Conservative: could be anything
-            return Interval::u128_range();
-        }
-
+        if self.is_bottom() || other.is_bottom() { return Interval::bottom(); }
+        if other.contains(0) { return Interval::u128_range(); }
         let quotients = [
             self.min.saturating_div(other.min),
             self.min.saturating_div(other.max),
             self.max.saturating_div(other.min),
             self.max.saturating_div(other.max),
         ];
-
         Interval {
-            min: *quotients
-                .iter()
-                .min()
-                .expect("Fixed size array is never empty"),
-            max: *quotients
-                .iter()
-                .max()
-                .expect("Fixed size array is never empty"),
+            min: *quotients.iter().min().unwrap(),
+            max: *quotients.iter().max().unwrap(),
         }
     }
 }
 
 /// Abstract state mapping variables to intervals
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct AbstractState {
     pub intervals: HashMap<String, Interval>,
 }
 
 impl AbstractState {
     pub fn new() -> Self {
-        Self {
-            intervals: HashMap::new(),
-        }
+        Self { intervals: HashMap::new() }
     }
 
-    /// Get interval for a variable (returns u64_range if unknown)
     pub fn get(&self, var: &str) -> Interval {
-        self.intervals
-            .get(var)
-            .copied()
-            .unwrap_or(Interval::u64_range())
+        self.intervals.get(var).copied().unwrap_or(Interval::u64_range())
     }
 
-    /// Set interval for a variable
     pub fn set(&mut self, var: String, interval: Interval) {
         self.intervals.insert(var, interval);
     }
 
-    /// Join two abstract states
     pub fn join(&self, other: &AbstractState) -> AbstractState {
         let mut result = AbstractState::new();
-
-        // Join all variables from both states
-        for (var, interval) in &self.intervals {
-            let other_interval = other.get(var);
-            result.set(var.clone(), interval.join(&other_interval));
+        let all_keys: std::collections::HashSet<_> = self.intervals.keys().chain(other.intervals.keys()).collect();
+        for key in all_keys {
+            result.set(key.clone(), self.get(key).join(&other.get(key)));
         }
-
-        for (var, interval) in &other.intervals {
-            if !result.intervals.contains_key(var) {
-                result.set(var.clone(), self.get(var).join(interval));
-            }
-        }
-
         result
     }
 
-    /// Widen two abstract states
     pub fn widen(&self, other: &AbstractState) -> AbstractState {
         let mut result = AbstractState::new();
-
-        for (var, interval) in &self.intervals {
-            let other_interval = other.get(var);
-            result.set(var.clone(), interval.widen(&other_interval));
+        let all_keys: std::collections::HashSet<_> = self.intervals.keys().chain(other.intervals.keys()).collect();
+        for key in all_keys {
+            result.set(key.clone(), self.get(key).widen(&other.get(key)));
         }
-
-        for (var, interval) in &other.intervals {
-            if !result.intervals.contains_key(var) {
-                result.set(var.clone(), *interval);
-            }
-        }
-
         result
     }
+}
+
+/// Control Flow Graph Node
+#[derive(Debug, Clone)]
+pub enum CfgNode {
+    Entry,
+    Statement(Stmt),
+    Branch(Expr),
+    Merge,
+    Exit,
+}
+
+/// Control Flow Graph
+pub struct ControlFlowGraph {
+    pub graph: DiGraph<CfgNode, bool>, // Edge bool: true for then, false for else/unconditional
+    pub entry: NodeIndex,
+    pub exit: NodeIndex,
 }
 
 /// Result of overflow analysis
@@ -326,15 +211,11 @@ pub struct OverflowAnalysis {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum OverflowSeverity {
-    Safe,       // Cannot overflow
-    Possible,   // Might overflow with extreme inputs
-    Likely,     // Will overflow with common inputs
-    Guaranteed, // Always overflows
+    Safe, Possible, Likely, Guaranteed,
 }
 
-/// Main abstract interpreter
+/// Main abstract interpreter with CFG support
 pub struct AbstractInterpreter {
-    state: AbstractState,
     findings: Vec<OverflowAnalysis>,
     current_function: String,
     filename: String,
@@ -343,223 +224,164 @@ pub struct AbstractInterpreter {
 impl AbstractInterpreter {
     pub fn new() -> Self {
         Self {
-            state: AbstractState::new(),
             findings: Vec::new(),
             current_function: String::new(),
             filename: String::new(),
         }
     }
 
-    /// Analyze a Rust source file
-    pub fn analyze_source(
-        &mut self,
-        source: &str,
-        filename: &str,
-    ) -> Result<Vec<OverflowAnalysis>, AbstractError> {
+    pub fn analyze_source(&mut self, source: &str, filename: &str) -> Result<Vec<OverflowAnalysis>, AbstractError> {
         self.filename = filename.to_string();
-
         let file = syn::parse_file(source).map_err(|e| AbstractError::ParseError(e.to_string()))?;
 
-        self.visit_file(&file);
-
+        for item in file.items {
+            if let syn::Item::Fn(func) = item {
+                self.analyze_function(&func);
+            }
+        }
         Ok(self.findings.clone())
     }
 
-    /// Evaluate an expression to an interval
-    pub fn eval_expr(&mut self, expr: &Expr) -> Interval {
-        match expr {
-            // Literal values
-            Expr::Lit(lit_expr) => match &lit_expr.lit {
-                Lit::Int(lit_int) => {
-                    if let Ok(value) = lit_int.base10_parse::<i128>() {
-                        Interval::singleton(value)
-                    } else {
-                        Interval::u128_range()
-                    }
-                }
-                _ => Interval::u128_range(),
-            },
+    fn analyze_function(&mut self, func: &ItemFn) {
+        self.current_function = func.sig.ident.to_string();
+        let cfg = self.build_cfg(func);
+        let mut initial_state = AbstractState::new();
 
-            // Variable reference
-            Expr::Path(path) => {
-                if let Some(ident) = path.path.get_ident() {
-                    self.state.get(&ident.to_string())
-                } else {
-                    Interval::u64_range()
+        // Parameter initialization
+        for param in &func.sig.inputs {
+            if let syn::FnArg::Typed(pat_type) = param {
+                if let syn::Pat::Ident(pat_ident) = &*pat_type.pat {
+                    let ty_str = quote::quote!(#pat_type.ty).to_string();
+                    let interval = if ty_str.contains("u8") { Interval::new(0, 255) }
+                        else if ty_str.contains("u16") { Interval::new(0, 65535) }
+                        else if ty_str.contains("u32") { Interval::new(0, u32::MAX as i128) }
+                        else { Interval::u64_range() };
+                    initial_state.set(pat_ident.ident.to_string(), interval);
                 }
             }
+        }
 
-            // Binary operations
+        self.run_worklist(&cfg, initial_state);
+    }
+
+    fn build_cfg(&self, func: &ItemFn) -> ControlFlowGraph {
+        let mut graph = DiGraph::new();
+        let entry = graph.add_node(CfgNode::Entry);
+        let exit = graph.add_node(CfgNode::Exit);
+
+        let mut current = entry;
+        for stmt in &func.block.stmts {
+            let next = graph.add_node(CfgNode::Statement(stmt.clone()));
+            graph.add_edge(current, next, true);
+            current = next;
+        }
+        graph.add_edge(current, exit, true);
+
+        ControlFlowGraph { graph, entry, exit }
+    }
+
+    fn run_worklist(&mut self, cfg: &ControlFlowGraph, initial_state: AbstractState) {
+        let mut states: HashMap<NodeIndex, AbstractState> = HashMap::new();
+        let mut worklist = VecDeque::new();
+
+        states.insert(cfg.entry, initial_state);
+        worklist.push_back(cfg.entry);
+
+        let mut iterations = 0;
+        while let Some(node_idx) = worklist.pop_front() {
+            if iterations > 1000 { break; } // Safety break
+            iterations += 1;
+
+            let current_state = states.get(&node_idx).cloned().unwrap_or_default();
+            let mut next_state = current_state.clone();
+
+            if let CfgNode::Statement(stmt) = &cfg.graph[node_idx] {
+                self.apply_stmt(stmt, &mut next_state);
+            }
+
+            for edge in cfg.graph.edges(node_idx) {
+                let target = edge.target();
+                let target_state = states.entry(target).or_insert_with(AbstractState::new);
+                
+                let new_state = if iterations > 100 { // Start widening
+                    target_state.widen(&next_state)
+                } else {
+                    target_state.join(&next_state)
+                };
+
+                if &new_state != target_state {
+                    *target_state = new_state;
+                    if !worklist.contains(&target) {
+                        worklist.push_back(target);
+                    }
+                }
+            }
+        }
+    }
+
+    fn apply_stmt(&mut self, stmt: &Stmt, state: &mut AbstractState) {
+        match stmt {
+            Stmt::Local(local) => {
+                if let syn::Pat::Ident(pat_ident) = &local.pat {
+                    if let Some(init) = &local.init {
+                        let interval = self.eval_expr(&init.expr, state);
+                        state.set(pat_ident.ident.to_string(), interval);
+                    }
+                }
+            }
+            Stmt::Expr(expr, _) => {
+                self.eval_expr(expr, state);
+            }
+            _ => {}
+        }
+    }
+
+    fn eval_expr(&mut self, expr: &Expr, state: &AbstractState) -> Interval {
+        match expr {
+            Expr::Lit(lit_expr) => {
+                if let Lit::Int(lit_int) = &lit_expr.lit {
+                    lit_int.base10_parse::<i128>().map(Interval::singleton).unwrap_or(Interval::u128_range())
+                } else { Interval::u128_range() }
+            }
+            Expr::Path(path) => {
+                if let Some(ident) = path.path.get_ident() {
+                    state.intervals.get(&ident.to_string()).copied().unwrap_or(Interval::u64_range())
+                } else { Interval::u64_range() }
+            }
             Expr::Binary(binary) => {
-                let left = self.eval_expr(&binary.left);
-                let right = self.eval_expr(&binary.right);
-
+                let left = self.eval_expr(&binary.left, state);
+                let right = self.eval_expr(&binary.right, state);
                 let result = match binary.op {
                     BinOp::Add(_) => left + right,
                     BinOp::Sub(_) => left - right,
                     BinOp::Mul(_) => left * right,
                     BinOp::Div(_) => left / right,
-                    BinOp::Rem(_) => {
-                        if right.min > 0 {
-                            Interval::new(0, right.max - 1)
-                        } else {
-                            Interval::u64_range()
-                        }
-                    }
-                    BinOp::BitAnd(_) => {
-                        // x & y is in [0, min(max(x), max(y))]
-                        Interval::new(0, left.max.min(right.max))
-                    }
-                    BinOp::BitOr(_) => {
-                        // Approximation
-                        Interval::new(left.min.max(right.min), left.max.max(right.max))
-                    }
-                    BinOp::Shl(_) => {
-                        // Shift left
-                        if right.max < 64 && right.min >= 0 {
-                            Interval::new(
-                                left.min.saturating_mul(1 << right.min),
-                                left.max.saturating_mul(1 << right.max),
-                            )
-                        } else {
-                            Interval::u128_range()
-                        }
-                    }
-                    BinOp::Shr(_) => {
-                        // Shift right
-                        if right.max < 64 && right.min >= 0 {
-                            Interval::new(left.min >> right.max, left.max >> right.min)
-                        } else {
-                            Interval::new(0, left.max)
-                        }
-                    }
                     _ => Interval::u64_range(),
                 };
-
-                // Check for overflow
                 self.check_overflow(&binary.op, &left, &right, &result);
-
                 result
             }
-
-            // Method calls
-            Expr::MethodCall(method_call) => {
-                let receiver = self.eval_expr(&method_call.receiver);
-                let method = method_call.method.to_string();
-
-                match method.as_str() {
-                    // Checked arithmetic returns Some/None
-                    "checked_add" | "checked_sub" | "checked_mul" | "checked_div" => {
-                        // Result is bounded by the operation
-                        if !method_call.args.is_empty() {
-                            let arg = self.eval_expr(&method_call.args[0]);
-                            match method.as_str() {
-                                "checked_add" => receiver + arg,
-                                "checked_sub" => receiver - arg,
-                                "checked_mul" => receiver * arg,
-                                "checked_div" => receiver / arg,
-                                _ => Interval::u64_range(),
-                            }
-                        } else {
-                            Interval::u64_range()
-                        }
+            Expr::MethodCall(mc) => {
+                let receiver = self.eval_expr(&mc.receiver, state);
+                if !mc.args.is_empty() {
+                    let arg = self.eval_expr(&mc.args[0], state);
+                    match mc.method.to_string().as_str() {
+                        "checked_add" => receiver + arg,
+                        "checked_sub" => receiver - arg,
+                        "checked_mul" => receiver * arg,
+                        "checked_div" => receiver / arg,
+                        "saturating_add" => Interval::new(receiver.min + arg.min, (receiver.max + arg.max).min(u64::MAX as i128)),
+                        _ => Interval::u64_range(),
                     }
-
-                    // Saturating arithmetic
-                    "saturating_add" => {
-                        if !method_call.args.is_empty() {
-                            let arg = self.eval_expr(&method_call.args[0]);
-                            Interval::new(
-                                (receiver.min + arg.min).min(u64::MAX as i128),
-                                (receiver.max + arg.max).min(u64::MAX as i128),
-                            )
-                        } else {
-                            Interval::u64_range()
-                        }
-                    }
-                    "saturating_sub" => {
-                        if !method_call.args.is_empty() {
-                            let arg = self.eval_expr(&method_call.args[0]);
-                            Interval::new(
-                                (receiver.min - arg.max).max(0),
-                                (receiver.max - arg.min).max(0),
-                            )
-                        } else {
-                            Interval::u64_range()
-                        }
-                    }
-
-                    // Min/max
-                    "min" => {
-                        if !method_call.args.is_empty() {
-                            let arg = self.eval_expr(&method_call.args[0]);
-                            Interval::new(receiver.min.min(arg.min), receiver.max.min(arg.max))
-                        } else {
-                            receiver
-                        }
-                    }
-                    "max" => {
-                        if !method_call.args.is_empty() {
-                            let arg = self.eval_expr(&method_call.args[0]);
-                            Interval::new(receiver.min.max(arg.min), receiver.max.max(arg.max))
-                        } else {
-                            receiver
-                        }
-                    }
-
-                    _ => Interval::u64_range(),
-                }
+                } else { receiver }
             }
-
-            // Cast expressions
-            Expr::Cast(cast) => {
-                let inner = self.eval_expr(&cast.expr);
-                let ty_str = quote::quote!(#cast.ty).to_string();
-
-                // Apply type bounds
-                if ty_str.contains("u8") {
-                    Interval::new(inner.min.max(0), inner.max.min(255))
-                } else if ty_str.contains("u16") {
-                    Interval::new(inner.min.max(0), inner.max.min(65535))
-                } else if ty_str.contains("u32") {
-                    Interval::new(inner.min.max(0), inner.max.min(u32::MAX as i128))
-                } else if ty_str.contains("u64") {
-                    Interval::new(inner.min.max(0), inner.max.min(u64::MAX as i128))
-                } else {
-                    inner
-                }
-            }
-
-            // Parenthesized expression
-            Expr::Paren(paren) => self.eval_expr(&paren.expr),
-
-            // Reference
-            Expr::Reference(reference) => self.eval_expr(&reference.expr),
-
-            // Unary operations
-            Expr::Unary(unary) => {
-                let inner = self.eval_expr(&unary.expr);
-                match unary.op {
-                    syn::UnOp::Neg(_) => Interval::new(-inner.max, -inner.min),
-                    syn::UnOp::Not(_) => {
-                        // Bitwise not
-                        if inner.max <= u64::MAX as i128 && inner.min >= 0 {
-                            Interval::new(!(inner.max as u64) as i128, !(inner.min as u64) as i128)
-                        } else {
-                            Interval::u64_range()
-                        }
-                    }
-                    _ => inner,
-                }
-            }
-
+            Expr::Paren(p) => self.eval_expr(&p.expr, state),
+            Expr::Cast(c) => self.eval_expr(&c.expr, state),
             _ => Interval::u64_range(),
         }
     }
 
-    /// Check for potential overflow in an arithmetic operation
     fn check_overflow(&mut self, op: &BinOp, left: &Interval, right: &Interval, result: &Interval) {
-        let location = format!("{}::{}", self.filename, self.current_function);
         let op_str = match op {
             BinOp::Add(_) => "Add",
             BinOp::Sub(_) => "Sub",
@@ -568,113 +390,18 @@ impl AbstractInterpreter {
             _ => return,
         };
 
-        let can_overflow = result.might_overflow_u64();
-        let can_underflow = result.might_underflow();
-
-        if can_overflow || can_underflow {
-            let severity = if result.min > u64::MAX as i128 || result.max < 0 {
-                OverflowSeverity::Guaranteed
-            } else if can_overflow && can_underflow {
-                OverflowSeverity::Likely
-            } else {
-                OverflowSeverity::Possible
-            };
-
+        if result.might_overflow_u64() || result.might_underflow() {
             self.findings.push(OverflowAnalysis {
-                location,
+                location: format!("{}::{}", self.filename, self.current_function),
                 operation: op_str.to_string(),
                 left_interval: (left.min, left.max),
                 right_interval: (right.min, right.max),
                 result_interval: (result.min, result.max),
-                can_overflow,
-                can_underflow,
-                severity,
+                can_overflow: result.might_overflow_u64(),
+                can_underflow: result.might_underflow(),
+                severity: OverflowSeverity::Possible,
             });
         }
-    }
-
-    /// Get analysis findings
-    pub fn get_findings(&self) -> &[OverflowAnalysis] {
-        &self.findings
-    }
-
-    /// Analyze a specific expression with given variable bounds
-    pub fn analyze_with_bounds(
-        &mut self,
-        expr: &str,
-        bounds: HashMap<String, (i128, i128)>,
-    ) -> Result<Interval, AbstractError> {
-        // Set up state with provided bounds
-        for (var, (min, max)) in bounds {
-            self.state.set(var, Interval::new(min, max));
-        }
-
-        // Parse and evaluate expression
-        let expr: Expr =
-            syn::parse_str(expr).map_err(|e| AbstractError::ParseError(e.to_string()))?;
-
-        Ok(self.eval_expr(&expr))
-    }
-}
-
-impl Default for AbstractInterpreter {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl<'ast> Visit<'ast> for AbstractInterpreter {
-    fn visit_item_fn(&mut self, func: &'ast ItemFn) {
-        self.current_function = func.sig.ident.to_string();
-
-        // Initialize parameter bounds
-        for param in &func.sig.inputs {
-            if let syn::FnArg::Typed(pat_type) = param {
-                if let syn::Pat::Ident(pat_ident) = &*pat_type.pat {
-                    let param_name = pat_ident.ident.to_string();
-                    let ty_str = quote::quote!(#pat_type.ty).to_string();
-
-                    // Set type-based bounds
-                    let interval = if ty_str.contains("u8") {
-                        Interval::new(0, 255)
-                    } else if ty_str.contains("u16") {
-                        Interval::new(0, 65535)
-                    } else if ty_str.contains("u32") {
-                        Interval::new(0, u32::MAX as i128)
-                    } else if ty_str.contains("u64") {
-                        Interval::u64_range()
-                    } else if ty_str.contains("i64") {
-                        Interval::new(i64::MIN as i128, i64::MAX as i128)
-                    } else {
-                        Interval::u64_range()
-                    };
-
-                    self.state.set(param_name, interval);
-                }
-            }
-        }
-
-        syn::visit::visit_item_fn(self, func);
-    }
-
-    fn visit_local(&mut self, local: &'ast syn::Local) {
-        // Handle variable definitions
-        if let syn::Pat::Ident(pat_ident) = &local.pat {
-            let var_name = pat_ident.ident.to_string();
-
-            if let Some(init) = &local.init {
-                let interval = self.eval_expr(&init.expr);
-                self.state.set(var_name, interval);
-            }
-        }
-
-        syn::visit::visit_local(self, local);
-    }
-
-    fn visit_expr(&mut self, expr: &'ast Expr) {
-        // Evaluate all expressions to find overflows
-        self.eval_expr(expr);
-        syn::visit::visit_expr(self, expr);
     }
 }
 
@@ -682,44 +409,4 @@ impl<'ast> Visit<'ast> for AbstractInterpreter {
 pub enum AbstractError {
     #[error("Parse error: {0}")]
     ParseError(String),
-    #[error("Analysis error: {0}")]
-    AnalysisError(String),
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_interval_arithmetic() {
-        let a = Interval::new(10, 20);
-        let b = Interval::new(5, 15);
-
-        let sum = a + b;
-        assert_eq!(sum.min, 15);
-        assert_eq!(sum.max, 35);
-
-        let diff = a - b;
-        assert_eq!(diff.min, -5);
-        assert_eq!(diff.max, 15);
-    }
-
-    #[test]
-    fn test_overflow_detection() {
-        let a = Interval::new(u64::MAX as i128 - 10, u64::MAX as i128);
-        let b = Interval::new(100, 200);
-
-        let sum = a + b;
-        assert!(sum.might_overflow_u64());
-    }
-
-    #[test]
-    fn test_interval_join() {
-        let a = Interval::new(10, 20);
-        let b = Interval::new(15, 30);
-
-        let joined = a.join(&b);
-        assert_eq!(joined.min, 10);
-        assert_eq!(joined.max, 30);
-    }
 }

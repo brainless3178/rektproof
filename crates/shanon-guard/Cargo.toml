@@ -1,0 +1,20 @@
+[package]
+name = "shanon-guard"
+version.workspace = true
+edition.workspace = true
+description = "Solana dependency firewall — detects malicious, typosquatted, and vulnerable packages in Cargo.toml and package.json"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = "0.8"
+semver = "1.0"
+strsim = "0.11"
+walkdir = { workspace = true }
+colored = { workspace = true }
+thiserror = { workspace = true }
+chrono = { workspace = true }
+sha2 = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"

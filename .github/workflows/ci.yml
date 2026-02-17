@@ -30,6 +30,42 @@ jobs:
       - name: Run tests (all workspace crates)
         run: cargo test --workspace
 
+  accuracy:
+    name: Accuracy Benchmarks
+    runs-on: ubuntu-latest
+    needs: [check]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Run accuracy benchmarks (vulnerable-vault, vulnerable-token, vulnerable-staking)
+        run: cargo test -p program-analyzer --test accuracy_benchmarks -- --nocapture
+      - name: Print accuracy summary
+        if: always()
+        run: |
+          echo "═══════════════════════════════════════════════════"
+          echo "  Accuracy benchmarks ran. Check step output above."
+          echo ""
+          echo "  Thresholds (recall %):"
+          echo "    Vault:     ≥ 40%"
+          echo "    Token:     ≥ 80%"
+          echo "    Staking:   ≥ 90%"
+          echo "    Aggregate: ≥ 50%"
+          echo "═══════════════════════════════════════════════════"
+
+  oracle-build:
+    name: Oracle Program Build
+    runs-on: ubuntu-latest
+    needs: [check]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build oracle program (no-entrypoint for testing)
+        run: cargo build -p shanon-oracle --features no-entrypoint
+      - name: Verify oracle program compiles with CPI feature
+        run: cargo build -p shanon-oracle --features cpi
+
   fmt:
     name: Rustfmt
     runs-on: ubuntu-latest
@@ -64,3 +100,38 @@ jobs:
         run: cargo doc --workspace --no-deps
         env:
           RUSTDOCFLAGS: -D warnings
+
+  coverage:
+    name: Code Coverage
+    runs-on: ubuntu-latest
+    needs: [test]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install tarpaulin
+        run: cargo install cargo-tarpaulin
+      - name: Generate coverage report
+        run: cargo tarpaulin --config .cargo/tarpaulin.toml --out Html Json Lcov
+      - name: Upload coverage artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: target/tarpaulin/
+
+  release:
+    name: Build Release Binaries
+    runs-on: ubuntu-latest
+    needs: [test, clippy]
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build release binaries
+        run: cargo build --release --bin shanon-api
+      - name: Upload binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: shanon-binaries-${{ github.sha }}
+          path: target/release/shanon-api

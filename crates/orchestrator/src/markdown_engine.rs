@@ -24,7 +24,7 @@ impl MarkdownEngine {
             "- **Medium Issues:** {} 🟡\n",
             report.medium_count
         ));
-        md.push_str("- **Status:** CONNECTED (mainnet-beta) 🌐\n\n");
+        md.push_str(&format!("- **Status:** {} 🌐\n\n", report.network_status));
 
         md.push_str("## **Executive Summary**\n");
         if let Some(advice) = &report.deployment_advice {

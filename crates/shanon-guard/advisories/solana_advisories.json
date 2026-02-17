@@ -1,0 +1,175 @@
+{
+    "schema_version": "1.0.0",
+    "last_updated": "2026-02-16",
+    "advisories": [
+        {
+            "id": "SHANON-2024-001",
+            "package": "@solana/web3.js",
+            "ecosystem": "npm",
+            "affected_versions": [
+                "1.95.6",
+                "1.95.7"
+            ],
+            "severity": "critical",
+            "title": "Backdoor in @solana/web3.js — private key exfiltration",
+            "description": "Versions 1.95.6 and 1.95.7 contained a backdoor that exfiltrated private keys to a remote server. Over $130K was stolen from developers.",
+            "cve": null,
+            "reference": "https://socket.dev/blog/supply-chain-attack-solana-web3-js",
+            "remediation": "Upgrade to @solana/web3.js >= 1.95.8 immediately. Rotate all keys used on affected machines."
+        },
+        {
+            "id": "SHANON-2024-002",
+            "package": "solana-transaction-toolkit",
+            "ecosystem": "npm",
+            "affected_versions": [
+                "*"
+            ],
+            "severity": "critical",
+            "title": "Wallet drainer package",
+            "description": "Entire package is malicious. Drains SOL from wallets by intercepting transaction signing.",
+            "cve": null,
+            "reference": "https://socket.dev/npm/package/solana-transaction-toolkit",
+            "remediation": "Remove immediately. This is a known malicious package."
+        },
+        {
+            "id": "SHANON-2024-003",
+            "package": "solana-stable-web-huks",
+            "ecosystem": "npm",
+            "affected_versions": [
+                "*"
+            ],
+            "severity": "critical",
+            "title": "Typosquat wallet drainer",
+            "description": "Typosquat of @solana/web3.js that steals private keys on import.",
+            "cve": null,
+            "reference": null,
+            "remediation": "Remove immediately. Use the official @solana/web3.js package."
+        },
+        {
+            "id": "SHANON-2024-004",
+            "package": "@kodane/patch-manager",
+            "ecosystem": "npm",
+            "affected_versions": [
+                "*"
+            ],
+            "severity": "critical",
+            "title": "AI-generated malware targeting Solana developers",
+            "description": "Package uses AI-generated code to exfiltrate secrets and crypto keys from developer machines.",
+            "cve": null,
+            "reference": null,
+            "remediation": "Remove immediately and scan your machine for compromised credentials."
+        },
+        {
+            "id": "SHANON-2024-005",
+            "package": "solana-token-helpers",
+            "ecosystem": "npm",
+            "affected_versions": [
+                "*"
+            ],
+            "severity": "critical",
+            "title": "Malicious token helper that steals keypairs",
+            "description": "Mimics legitimate SPL token utility but contains hidden key exfiltration in postinstall script.",
+            "cve": null,
+            "reference": null,
+            "remediation": "Remove immediately. Use @solana/spl-token instead."
+        },
+        {
+            "id": "SHANON-2024-006",
+            "package": "solanaweb3js",
+            "ecosystem": "npm",
+            "affected_versions": [
+                "*"
+            ],
+            "severity": "critical",
+            "title": "Typosquat of @solana/web3.js",
+            "description": "Fake package mimicking the official Solana Web3 library. Contains backdoor code.",
+            "cve": null,
+            "reference": null,
+            "remediation": "Remove immediately. Use the official @solana/web3.js package."
+        },
+        {
+            "id": "SHANON-2024-007",
+            "package": "solana-web3-toolkit",
+            "ecosystem": "npm",
+            "affected_versions": [
+                "*"
+            ],
+            "severity": "critical",
+            "title": "Fake Solana toolkit with key exfiltration",
+            "description": "Mimics a legitimate Solana development toolkit but steals private keys.",
+            "cve": null,
+            "reference": null,
+            "remediation": "Remove immediately."
+        },
+        {
+            "id": "SHANON-2024-008",
+            "package": "anchor-lang-malicious",
+            "ecosystem": "cargo",
+            "affected_versions": [
+                "*"
+            ],
+            "severity": "critical",
+            "title": "Fake anchor-lang crate",
+            "description": "Typosquat/fake anchor-lang crate that could inject malicious code into Solana programs.",
+            "cve": null,
+            "reference": null,
+            "remediation": "Remove immediately. Use the official anchor-lang crate."
+        },
+        {
+            "id": "SHANON-2024-009",
+            "package": "spl-token-fake",
+            "ecosystem": "cargo",
+            "affected_versions": [
+                "*"
+            ],
+            "severity": "critical",
+            "title": "Fake spl-token crate",
+            "description": "Impersonates the official spl-token crate with modified transfer logic that could redirect tokens.",
+            "cve": null,
+            "reference": null,
+            "remediation": "Remove immediately. Use the official spl-token crate."
+        },
+        {
+            "id": "SHANON-2024-010",
+            "package": "solana-sdk-helpers",
+            "ecosystem": "cargo",
+            "affected_versions": [
+                "*"
+            ],
+            "severity": "high",
+            "title": "Suspicious Solana SDK helper with network access",
+            "description": "Claims to provide helper utilities for solana-sdk but includes network calls in build scripts.",
+            "cve": null,
+            "reference": null,
+            "remediation": "Remove and audit your build artifacts."
+        },
+        {
+            "id": "SHANON-2024-011",
+            "package": "@coral-xyz/anchor-malicious",
+            "ecosystem": "npm",
+            "affected_versions": [
+                "*"
+            ],
+            "severity": "critical",
+            "title": "Fake Anchor framework package",
+            "description": "Impersonates @coral-xyz/anchor to inject malicious code into Anchor-based dApps.",
+            "cve": null,
+            "reference": null,
+            "remediation": "Remove immediately. Use the official @coral-xyz/anchor package."
+        },
+        {
+            "id": "SHANON-2024-012",
+            "package": "metaplex-token-metadata",
+            "ecosystem": "npm",
+            "affected_versions": [
+                "*"
+            ],
+            "severity": "high",
+            "title": "Fake Metaplex metadata package",
+            "description": "Unofficial package that mimics Metaplex functionality but may contain supply chain risks.",
+            "cve": null,
+            "reference": null,
+            "remediation": "Remove and use the official @metaplex-foundation packages."
+        }
+    ]
+}

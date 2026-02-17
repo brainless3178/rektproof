@@ -7,7 +7,7 @@ edition.workspace = true
 program-analyzer = { path = "../program-analyzer" }
 serde.workspace = true
 serde_json.workspace = true
-reqwest = { workspace = true, features = ["json"] }
+reqwest = { workspace = true, features = ["json", "stream"] }
 tokio.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
