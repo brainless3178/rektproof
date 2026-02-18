@@ -33,3 +33,5 @@ test_targets/
 .netlify
 .vercel
 .env*.local
+.gemini/
+real_exploits/

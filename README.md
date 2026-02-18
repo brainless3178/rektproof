@@ -1,253 +1,128 @@
-<p align="center">
-  <img src="assets/logo.png" alt="Shannon Security" width="200"/>
-</p>
+# 2R1IN
 
-<h1 align="center">Shannon Security Platform</h1>
+**Static security analyzer for Solana programs.**
 
-<p align="center">
-  <strong>Enterprise-Grade Security Analysis for Solana Programs</strong>
-</p>
+2R1IN scans Solana/Anchor source code for vulnerability patterns — missing signer checks, unsafe CPI calls, integer overflow, account validation gaps, and 70+ other detectors. It runs locally, outputs structured findings, and integrates with CI/CD.
 
-<p align="center">
-  <a href="#features">Features</a> •
-  <a href="#quick-start">Quick Start</a> •
-  <a href="#api-documentation">API</a> •
-  <a href="#audit-status">Audit</a> •
-  <a href="LICENSE">License</a>
-</p>
+## Real-World Validation
 
-<p align="center">
-  <img src="https://img.shields.io/badge/Score-95%2F100-brightgreen?style=flat-square" alt="Audit Score"/>
-  <img src="https://img.shields.io/badge/Grade-A-brightgreen?style=flat-square" alt="Grade A"/>
-  <img src="https://img.shields.io/badge/Detectors-72-blue?style=flat-square" alt="72 Detectors"/>
-  <img src="https://img.shields.io/badge/License-MIT-blue?style=flat-square" alt="MIT License"/>
-  <img src="https://img.shields.io/badge/Rust-1.73+-orange?style=flat-square" alt="Rust"/>
-</p>
+We tested against **real exploited Solana programs** (not just self-written test cases):
 
----
+| Program | Exploit | Loss | Detected? |
+|---------|---------|------|-----------|
+| [Wormhole Bridge](https://github.com/certusone/wormhole) | Governance auth bypass | $320M | ✅ SOL-CFG-02 (unguarded governance CPI) |
+| [Cashio](https://github.com/cashioapp/cashio) | Missing account validation | $52M | ✅ SOL-012 (missing `has_one` relationship) |
+| [Saber Stable-Swap](https://github.com/saber-hq/stable-swap) | Authority check gaps | — | ✅ SOL-001 ×3 (raw AccountInfo authority) |
 
-## Audit Status
+**False positive rate on clean code:**
+- SPL Token-Wrap (Anchor): **0 findings** ✅
+- SPL Token-Lending (native): 2 findings (debatable)
+- SPL Governance (native): 17 findings (known FP limitation on native programs)
 
-**Latest Score: 95/100 (Grade A)** — Full audit report: [`AUDIT_REPORT.md`](AUDIT_REPORT.md)
-
-| Category | Score |
-|----------|-------|
-| Architecture & Code Quality | 91/100 |
-| Feature Completeness | 93/100 |
-| Testing & Reliability | 83/100 |
-| Performance & Scalability | 79/100 |
-| Documentation & Usability | 87/100 |
-| Security Best Practices | 92/100 |
-
----
-
-## Features
-
-### ✅ 10 Core Capabilities (All Verified)
-
-| # | Capability | Status | Description |
-|---|-----------|--------|-------------|
-| 1 | **Local Program Scanning** | ✅ Active | AST-based analysis of Rust/Anchor programs using `syn`. 72 vulnerability detectors with per-detector confidence calibration (55-95 range). Multi-stage false positive elimination pipeline. |
-| 2 | **Git Repository Scanning** | ✅ Active | Clone-and-scan any public GitHub/HTTPS repo. Temp directory management with auto-cleanup. |
-| 3 | **On-Chain Program Analysis** | ✅ Active | Fetch deployed programs via RPC. Analyze deployed bytecode metadata, authority status, immutability. |
-| 4 | **Token Risk Assessment** | ✅ Active | Rug-pull scoring: mint/freeze authority, supply concentration, Token-2022 extension analysis (transfer hooks, permanent delegate, confidential transfers). |
-| 5 | **Firedancer Compatibility** | ✅ Active | Compatibility checker for upcoming Firedancer validator client. Analyzes CU budget, syscall usage, instruction data patterns. |
-| 6 | **CPI Dependency Graphing** | ✅ Active | Maps cross-program invocation chains. Detects circular dependencies and trust boundary violations. |
-| 7 | **Security Scoring** | ✅ Active | Composite scoring with letter grades (A-F). Per-protocol scoreboard with embeddable SVG badges. |
-| 8 | **Live Authority Monitoring** | ✅ Active | Real-time upgrade authority checks. Detects mutability changes and authority transfers. |
-| 9 | **Compliance Verification** | ✅ Active | SOC2, ISO 27001, OWASP Solana Smart Contract Security (SCS), and Solana Foundation compliance frameworks. |
-| 10 | **Supply Chain Firewall** | ✅ Active | `shanon-guard`: Dependency scanner for malicious packages, typosquats, and behavioral anomalies. |
-
-### 🔬 Vulnerability Detection Engine
-
-72 pattern-match detectors covering:
-
-| Category | Detector IDs | Examples |
-|----------|-------------|---------|
-| Auth & Authorization | SOL-001 — SOL-005 | Missing signer check, owner verification, arbitrary CPI |
-| Arithmetic Safety | SOL-002, SOL-007, SOL-038, SOL-045 | Integer overflow, precision loss, unsafe math |
-| Account Validation | SOL-004, SOL-008, SOL-011, SOL-048 | Type cosplay, uninitialized accounts, reinitialization |
-| PDA Safety | SOL-009, SOL-012, SOL-016, SOL-065 | PDA seed collision, missing bump verification |
-| CPI Security | SOL-015, SOL-050, SOL-054 | Cross-Program invocation attacks, program impersonation |
-| Oracle Security | SOL-019, SOL-020, SOL-058 | Price manipulation, stale data, flash loan attacks |
-| DeFi Attack Vectors | SOL-033, SOL-034, SOL-049, SOL-066 | Sandwich attacks, LP manipulation, MEV extraction |
-| Token-2022 | SOL-055 — SOL-057 | Transfer hook reentrancy, fee mismatch, permanent delegate |
-| Governance | SOL-059, SOL-064, SOL-067 | State machine, governance bypass, upgrade authority |
-
-**Confidence Calibration:**
-- **85-95:** High-confidence AST checks (missing signer, unchecked CPI) — provable patterns
-- **70-84:** Strong heuristic patterns (overflow, type cosplay)
-- **55-69:** Pattern-match heuristics (informational, stylistic)
-
-### 🌐 REST API
-
-**24 endpoints** via Actix-web, with:
-- ✅ **Rate limiting** — Per-IP token-bucket (30 req/s default, configurable)
-- ✅ **CORS** — Environment-driven (`SHANON_CORS_ORIGIN`)
-- ✅ **API key auth** — Optional (`SHANON_API_KEY`)
-- ✅ **OpenAPI 3.0** — Full spec at `/api/v1/openapi.json`, Swagger UI at `/api/v1/docs`
-
----
+Full results: [BENCHMARKS.md](BENCHMARKS.md)
 
 ## Quick Start
 
-### Prerequisites
-
-- **Rust** 1.73+ (`rustup install stable`)
-- **Solana CLI** 1.18+ (for on-chain features)
-- **Z3** 4.12+ (for formal verification, optional)
-
-### Build
-
 ```bash
+# Build
 cargo build --release
+
+# Scan a local program
+./target/release/shanon scan ./path/to/program --format human
+
+# Scan with AI enhancement (Kimi K2.5)
+./target/release/shanon scan ./path/to/program --ai --api-key <NVIDIA_NIM_KEY>
+
+# JSON output for CI/CD
+./target/release/shanon scan ./path/to/program --format json
+
+# Filter by severity
+./target/release/shanon scan ./path/to/program --min-severity high
 ```
 
-### Run the API Server
+## What It Does
 
-```bash
-# Minimal (dev mode — all origins allowed, no auth)
-cargo run --release --bin shanon-api
+**6 analysis engines** run in pipeline:
 
-# Production
-SHANON_CORS_ORIGIN=https://app.shanon.security \
-SHANON_API_KEY=your-secret-key \
-SHANON_RATE_LIMIT_RPS=50 \
-SHANON_RATE_LIMIT_BURST=100 \
-SOLANA_RPC_URL=https://api.mainnet-beta.solana.com \
-cargo run --release --bin shanon-api
-```
+| Engine | Technique | What it catches |
+|--------|-----------|----------------|
+| Pattern Matcher | AST pattern matching | Missing signer, owner, type cosplay, unsafe close |
+| Deep AST | Anchor-aware structural analysis | Account validation gaps, PDA issues, CPI misuse |
+| Taint Analyzer | Lattice-based data flow | Untrusted input reaching sensitive operations |
+| CFG Analyzer | Control flow graph | Unguarded CPI calls, CEI violations |
+| Abstract Interpreter | Interval arithmetic | Integer overflow, division by zero |
+| Account Aliasing | Must-not-alias analysis | Same account passed to conflicting parameters |
 
-### Environment Variables
+**73 detectors** with hardcoded confidence scores (55-95%). Confidence values are heuristic estimates based on pattern strength, not empirically calibrated against a benchmark dataset. See [BENCHMARKS.md](BENCHMARKS.md) for real-world validation.
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `SHANON_HOST` | `0.0.0.0` | API bind address |
-| `SHANON_PORT` | `8080` | API port |
-| `SOLANA_RPC_URL` | `https://api.devnet.solana.com` | Solana RPC endpoint |
-| `SHANON_ORACLE_PROGRAM_ID` | Auto-detected | Oracle program public key |
-| `SHANON_API_KEY` | *(none)* | API authentication key (optional) |
-| `SHANON_CORS_ORIGIN` | `*` | CORS allowed origin (production: set to your domain) |
-| `SHANON_RATE_LIMIT_RPS` | `30` | Rate limit: requests per second per IP |
-| `SHANON_RATE_LIMIT_BURST` | `60` | Rate limit: burst capacity |
-| `LOG_FORMAT` | `text` | Log format (`text` or `json`) |
+## Detection Coverage
 
-### API Usage Examples
-
-```bash
-# Health check
-curl http://localhost:8080/health
-
-# Scan a program
-curl -X POST http://localhost:8080/api/v1/scan \
-  -H "Content-Type: application/json" \
-  -d '{"target": "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4"}'
-
-# Token risk assessment
-curl http://localhost:8080/api/v1/token/EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v/risk
-
-# Scan from GitHub
-curl -X POST http://localhost:8080/api/v1/scan \
-  -H "Content-Type: application/json" \
-  -d '{"target": "check", "source_url": "https://github.com/coral-xyz/anchor"}'
-
-# Pre-sign transaction safety check
-curl -X POST http://localhost:8080/api/v1/simulate \
-  -H "Content-Type: application/json" \
-  -d '{"programs": ["JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4"]}'
-
-# Upgrade authority check
-curl http://localhost:8080/api/v1/authority/JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4
-
-# OpenAPI spec
-curl http://localhost:8080/api/v1/openapi.json
-
-# Swagger UI
-open http://localhost:8080/api/v1/docs
-```
-
----
+| Category | IDs | Examples |
+|----------|-----|---------|
+| Auth & Authorization | SOL-001 — SOL-005 | Missing signer, owner verification, arbitrary CPI |
+| Arithmetic Safety | SOL-002, SOL-007, SOL-038 | Integer overflow, precision loss |
+| Account Validation | SOL-004, SOL-008, SOL-011 | Type cosplay, uninitialized accounts |
+| PDA Safety | SOL-009, SOL-012, SOL-016 | Seed collision, bump verification |
+| CPI Security | SOL-015, SOL-050, SOL-054 | Cross-program invocation attacks |
+| Oracle Security | SOL-019, SOL-020, SOL-058 | Price manipulation, stale data |
+| DeFi Vectors | SOL-033, SOL-034, SOL-049 | Sandwich attacks, LP manipulation |
+| Token-2022 | SOL-055 — SOL-057 | Transfer hooks, fee mismatch |
+| Governance | SOL-059, SOL-064, SOL-067 | State machine, upgrade authority |
 
 ## Architecture
 
 ```
-shannon/
-├── crates/
-│   ├── shanon-api/           # REST API server (Actix-web)
-│   │   ├── src/
-│   │   │   ├── main.rs       # Server bootstrap, CORS, rate limiting
-│   │   │   ├── routes.rs     # 22 API endpoint handlers
-│   │   │   ├── rate_limiter.rs  # Token-bucket rate limiting
-│   │   │   ├── openapi.rs    # OpenAPI 3.0 spec + Swagger UI
-│   │   │   ├── scoreboard.rs # Protocol security rankings
-│   │   │   └── badge.rs      # SVG badge generation
-│   ├── program-analyzer/     # Core vulnerability scanner
-│   │   └── src/
-│   │       ├── lib.rs         # AST parser, scan orchestration
-│   │       ├── vulnerability_db.rs  # 72 detectors with calibrated confidence
-│   │       ├── finding_validator.rs # 6-stage false positive elimination
-│   │       ├── ast_parser.rs  # syn-based Rust AST analysis
-│   │       ├── anchor_extractor.rs  # Anchor-specific analysis
-│   │       ├── config.rs      # Analyzer configuration
-│   │       ├── metrics.rs     # Performance metrics tracking
-│   │       ├── security.rs    # Rate limiting, secrets, validation utils
-│   │       └── traits.rs      # Analyzer trait interfaces
-│   ├── shanon-guard/         # Supply chain firewall
-│   ├── shanon-oracle/        # On-chain risk oracle (Anchor)
-│   ├── firedancer-scanner/   # Firedancer compatibility checker
-│   ├── compliance-engine/    # SOC2/ISO27001/OWASP/Solana Foundation
-│   ├── cpi-grapher/          # CPI dependency analysis
-│   ├── token-scanner/        # Token-2022 risk assessment
-│   └── ... (40 more crates)
-├── programs/
-│   └── shanon-oracle/        # Anchor program (deployed on-chain)
-├── exploits/                 # 9 exploit modules for testing
-├── test_shannon.sh           # 41-case integration test suite
-├── AUDIT_REPORT.md           # Full code audit report
-├── LICENSE                   # MIT License
-└── Cargo.toml                # Workspace root
+crates/
+├── shanon-cli/          # CLI with TUI dashboard
+├── program-analyzer/    # Core scanner (6 engines, 73 detectors)
+├── ai-enhancer/         # Kimi K2.5 AI analysis (optional)
+├── attack-simulator/    # PoC exploit generation
+├── shanon-api/          # REST API server (Actix-web)
+├── shanon-guard/        # Dependency supply chain scanner
+├── cpi-analyzer/        # Cross-program invocation graph
+├── firedancer-monitor/  # Firedancer compatibility checks
+├── kani-verifier/       # Formal verification harness generation
+└── ... (48 crates total — ~20 substantive analysis, rest infrastructure)
 ```
 
----
+## AI Enhancement (Optional)
+
+With `--ai` flag, findings are enriched by Kimi K2.5 (via NVIDIA NIM) with:
+- Technical deep-dive explanation
+- Attack scenario with concrete steps
+- Proof-of-concept exploit code
+- Recommended fix with code samples
+- Economic impact estimate
+
+Requires an NVIDIA NIM API key (`--api-key` or `OPENROUTER_API_KEY` env var).
 
 ## Testing
 
 ```bash
-# Run all unit tests
+# Run all 120+ unit tests
 cargo test --workspace
 
-# Run integration tests (requires API server running)
-./test_shannon.sh
-
-# Run specific crate tests
+# Run specific engine tests
 cargo test --package program-analyzer
-cargo test --package shanon-api
 ```
 
-### Test Coverage
-
-| Component | Unit Tests | Integration Tests |
-|-----------|-----------|-------------------|
-| program-analyzer | 220+ | 5 (via test script) |
-| finding-validator | 10 | — |
-| rate_limiter | 6 | 2 (via test script) |
-| shanon-guard | 45+ | 3 |
-| firedancer-scanner | 30+ | 2 |
-| token-scanner | 25+ | 3 |
-| cpi-grapher | 15+ | 2 |
-| compliance-engine | 20+ | 4 |
-
----
+Tests include detection-specific tests (`test_detects_missing_signer`, `test_detects_unchecked_arithmetic`, `test_detects_reentrancy`, etc.) plus infrastructure tests for serialization, config, and utilities.
 
 ## Known Limitations
 
-1. **Engine count semantics** — "48 engines" counts all workspace crates. ~20 are substantive analysis modules; the rest are infrastructure/utilities.
-2. **Git scanning** — Public HTTPS repos only. No SSH key or PAT authentication.
-3. **Firedancer scoring** — May grade standard programs low (F) due to conservative thresholds. Calibration needed.
-4. **Authority monitoring** — Polling-based only. No WebSocket streaming for real-time alerts.
-5. **`unwrap()` usage** — Found in ~60 files, predominantly in test code and environment variable defaults with `unwrap_or_else`. Non-critical paths.
+1. **Optimized for Anchor programs.** Native Solana programs with manual `is_signer` checks in function bodies generate false positives — the pattern matcher looks for type-level constraints, not runtime checks.
+2. **Pattern matching, not symbolic execution.** Catches vulnerability *patterns* (missing signer, unguarded CPI), not exploit *paths* (like the Wormhole secp256k1 parsing flaw). Subtle semantic bugs require manual review.
+3. **Confidence scores are heuristic.** Not calibrated against a labeled dataset. No published precision/recall metrics yet.
+4. **No external audit.** This tool itself has not been audited by a third-party security firm.
+5. **48 crates ≠ 48 engines.** ~20 are substantive analysis modules. The rest are CLI, API, infrastructure, and utilities.
 
----
+## What This Is Not
+
+- Not a replacement for manual security audit
+- Not validated against OtterSec, Neodyme, or Trail of Bits findings
+- Not production-hardened for use as sole security gate on mainnet deployments
+
+**Use as:** First-pass automated check to catch common vulnerability patterns before human review.
 
 ## License
 
