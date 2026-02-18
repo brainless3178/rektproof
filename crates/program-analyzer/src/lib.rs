@@ -58,6 +58,7 @@ fn normalize_quote_output(code: &str) -> String {
 }
 
 pub mod anchor_extractor;
+pub mod ast_checks;
 pub mod ast_parser;
 pub mod config;
 pub mod finding_validator;

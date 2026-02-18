@@ -35,3 +35,5 @@ test_targets/
 .env*.local
 .gemini/
 real_exploits/
+kani_proofs/
+production_audit_results/
