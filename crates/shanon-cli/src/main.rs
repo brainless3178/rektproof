@@ -11,7 +11,7 @@ use std::collections::HashMap;
 #[command(
     name = "shanon",
     version = "2.0.0",
-    about = "🛡️ Shanon — Enterprise-Grade Solana Security Platform",
+    about = "[shield] Shanon - Enterprise-Grade Solana Security Platform",
     long_about = "Shanon is an enterprise-grade Solana security platform.\n\n\
         6 analysis engines · 72+ vulnerability detectors\n\
         Lattice taint · CFG dominators · Abstract interpretation\n\
@@ -25,7 +25,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Scan a Solana program — launches interactive dashboard
+    /// Scan a Solana program - launches interactive dashboard
     Scan {
         path: String,
         /// Output format: dashboard (default), json, human, sarif, markdown
@@ -181,7 +181,7 @@ enum Commands {
         #[arg(long, default_value = "human")]
         format: String,
     },
-    /// Run full orchestrated pipeline: scan → consensus → strategy → report
+    /// Run full orchestrated pipeline: scan -> consensus -> strategy -> report
     Orchestrate {
         /// Path to Solana program source
         path: String,
@@ -230,13 +230,11 @@ async fn main() {
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-//  SCAN — Main command, launches interactive dashboard or prints output
-// ═══════════════════════════════════════════════════════════════════════════
+//  SCAN - Main command, launches interactive dashboard or prints output
 async fn cmd_scan(path: &str, format: &str, min_severity: &str, ai: bool, api_key: Option<&str>, model: &str, fix: bool, poc: bool, simulate: bool, verbose: bool, ai_strategy: bool, consensus: bool) {
     let source_path = Path::new(path);
     if !source_path.exists() {
-        eprintln!("  {} Path not found: {}", "✗".red(), path);
+        eprintln!("  {} Path not found: {}", "X".red(), path);
         std::process::exit(1);
     }
 
@@ -245,7 +243,7 @@ async fn cmd_scan(path: &str, format: &str, min_severity: &str, ai: bool, api_ke
     let phase_start = Instant::now();
     let analyzer = match program_analyzer::ProgramAnalyzer::new(source_path) {
         Ok(a) => a,
-        Err(e) => { eprintln!("  {} Init failed: {}", "✗".red(), e); std::process::exit(1); }
+        Err(e) => { eprintln!("  {} Init failed: {}", "X".red(), e); std::process::exit(1); }
     };
     let init_ms = phase_start.elapsed().as_millis();
 
@@ -255,7 +253,7 @@ async fn cmd_scan(path: &str, format: &str, min_severity: &str, ai: bool, api_ke
     let elapsed = timer.elapsed();
 
     if verbose {
-        eprintln!("  {} Phase timing:", "⏱".to_string().cyan());
+        eprintln!("  {} Phase timing:", "+".to_string().cyan());
         eprintln!("    Initialization: {}ms", init_ms);
         eprintln!("    Vulnerability scan: {}ms", scan_ms);
         eprintln!("    Total findings (pre-filter): {}", findings.len());
@@ -265,7 +263,7 @@ async fn cmd_scan(path: &str, format: &str, min_severity: &str, ai: bool, api_ke
     let min_sev: u8 = match min_severity { "critical" => 5, "high" => 4, "medium" => 3, _ => 1 };
     findings.retain(|f| f.severity >= min_sev);
 
-    // Fix ID collision: assign unique sub-IDs per finding ID (SOL-001 → SOL-001.1, SOL-001.2, ...)
+    // Fix ID collision: assign unique sub-IDs per finding ID (SOL-001 -> SOL-001.1, SOL-001.2, ...)
     let id_counts: HashMap<String, usize> = {
         let mut counts = HashMap::new();
         for f in &findings {
@@ -288,7 +286,7 @@ async fn cmd_scan(path: &str, format: &str, min_severity: &str, ai: bool, api_ke
         match api_key {
             Some(key) if !key.is_empty() => {
                 eprintln!("\n  {} AI Enhancement with {} ({} findings)...",
-                    "🧠".to_string().cyan(), model.bright_magenta(), findings.len());
+                    "+".to_string().cyan(), model.bright_magenta(), findings.len());
 
                 let enhancer = ai_enhancer::AIEnhancer::new(
                     key.to_string(),
@@ -312,17 +310,17 @@ async fn cmd_scan(path: &str, format: &str, min_severity: &str, ai: bool, api_ke
                     Ok(results) => {
                         let success = results.iter().filter(|(_, r)| r.is_ok()).count();
                         eprintln!("  {} AI analysis complete: {}/{} enhanced\n",
-                            "✓".green().bold(), success, results.len());
+                            "ok".green().bold(), success, results.len());
                         Some(results)
                     }
                     Err(_) => {
-                        eprintln!("  {} AI enhancement timed out (> 3s). Skipping...", "⚠".yellow());
+                        eprintln!("  {} AI enhancement timed out (> 3s). Skipping...", "!!".yellow());
                         None
                     }
                 }
             }
             _ => {
-                eprintln!("  {} --ai flag set but no API key provided.", "⚠".yellow());
+                eprintln!("  {} --ai flag set but no API key provided.", "!!".yellow());
                 eprintln!("    Use --api-key <KEY> or set OPENROUTER_API_KEY env var.");
                 None
             }
@@ -388,11 +386,11 @@ async fn cmd_scan(path: &str, format: &str, min_severity: &str, ai: bool, api_ke
 
     // ── Consensus Verification (Multi-LLM) ──────────────────────────────
     let consensus_results: Vec<(String, consensus_engine::ConsensusResult)> = if consensus {
-        eprintln!("  {}  Running consensus verification...", "🗳️".to_string());
+        eprintln!("  {}  Running consensus verification...", "+".to_string());
         let engine = match api_key {
             Some(key) if !key.is_empty() => consensus_engine::ConsensusEngine::with_openrouter(key),
             _ => {
-                eprintln!("    No API key — using offline heuristic fallback");
+                eprintln!("    No API key - using offline heuristic fallback");
                 consensus_engine::ConsensusEngine::new(vec![])
             }
         };
@@ -420,14 +418,14 @@ async fn cmd_scan(path: &str, format: &str, min_severity: &str, ai: bool, api_ke
     };
 
     if !consensus_results.is_empty() && format != "json" && format != "sarif" {
-        eprintln!("\n  {}  Consensus Results:", "🗳️".to_string());
+        eprintln!("\n  {}  Consensus Results:", "+".to_string());
         for (id, cr) in &consensus_results {
             let verdict_icon = match cr.final_verdict {
-                consensus_engine::Verdict::Confirmed => "✅",
-                consensus_engine::Verdict::Rejected => "❌",
-                consensus_engine::Verdict::Uncertain => "❓",
+                consensus_engine::Verdict::Confirmed => "[ok]",
+                consensus_engine::Verdict::Rejected => "[no]",
+                consensus_engine::Verdict::Uncertain => "[??]",
             };
-            eprintln!("    {} {} — {:?} (agreement: {:.0}%, confidence: {:.0}%, report: {})",
+            eprintln!("    {} {} - {:?} (agreement: {:.0}%, confidence: {:.0}%, report: {})",
                 verdict_icon, id, cr.final_verdict, cr.agreement_ratio * 100.0,
                 cr.confidence_score * 100.0, if cr.should_report { "yes" } else { "no" });
         }
@@ -437,7 +435,7 @@ async fn cmd_scan(path: &str, format: &str, min_severity: &str, ai: bool, api_ke
     let strategy_results: Vec<(String, Result<llm_strategist::ExploitStrategy, String>)> = if ai_strategy {
         match api_key {
             Some(key) if !key.is_empty() => {
-                eprintln!("  {}  Generating exploit strategies for HIGH/CRITICAL findings...", "🎯".to_string());
+                eprintln!("  {}  Generating exploit strategies for HIGH/CRITICAL findings...", "+".to_string());
                 let strategist = llm_strategist::LlmStrategist::new(key.to_string(), model.to_string());
                 let mut results = Vec::new();
                 for f in findings.iter().filter(|f| f.severity >= 4) {
@@ -454,7 +452,7 @@ async fn cmd_scan(path: &str, format: &str, min_severity: &str, ai: bool, api_ke
                 results
             }
             _ => {
-                eprintln!("  {} --ai-strategy requires an API key.", "⚠".yellow());
+                eprintln!("  {} --ai-strategy requires an API key.", "!!".yellow());
                 Vec::new()
             }
         }
@@ -463,15 +461,15 @@ async fn cmd_scan(path: &str, format: &str, min_severity: &str, ai: bool, api_ke
     };
 
     if !strategy_results.is_empty() && format != "json" && format != "sarif" {
-        eprintln!("\n  {}  Exploit Strategies:", "🎯".to_string());
+        eprintln!("\n  {}  Exploit Strategies:", "+".to_string());
         for (id, result) in &strategy_results {
             match result {
                 Ok(strategy) => {
-                    eprintln!("    {} {}", "⚔".to_string().red(), id);
+                    eprintln!("    {} {}", "+".to_string().red(), id);
                     eprintln!("      Vector: {}", strategy.attack_vector);
                     eprintln!("      Outcome: {}", strategy.expected_outcome);
                 }
-                Err(e) => eprintln!("    {} {} — failed: {}", "✗".red(), id, e),
+                Err(e) => eprintln!("    {} {} - failed: {}", "X".red(), id, e),
             }
         }
     }
@@ -571,7 +569,7 @@ async fn cmd_scan(path: &str, format: &str, min_severity: &str, ai: bool, api_ke
         // Print AI-enhanced analysis if available
         if let Some(ref ai_data) = ai_results {
             eprintln!("\n  ╔══════════════════════════════════════════════════════════════════════════════╗");
-            eprintln!("  ║  🧠  KIMI K2.5 AI-ENHANCED ANALYSIS                                        ║");
+            eprintln!("  ║  [ai]  KIMI K2.5 AI-ENHANCED ANALYSIS                                        ║");
             eprintln!("  ╚══════════════════════════════════════════════════════════════════════════════╝");
             for (id, result) in ai_data {
                 match result {
@@ -581,34 +579,34 @@ async fn cmd_scan(path: &str, format: &str, min_severity: &str, ai: bool, api_ke
                         eprintln!("\n  ┌──────────────────────────────────────────────────────────────────────────────┐");
                         eprintln!("  │  {}  {}  ", id.bright_red().bold(), title.bright_white().bold());
                         eprintln!("  ├──────────────────────────────────────────────────────────────────────────────┤");
-                        eprintln!("  │  {} {}", "⚙ Technical:".cyan().bold(), "");
+                        eprintln!("  │  {} {}", "[tech] Technical:".cyan().bold(), "");
                         for line in enhanced.technical_explanation.lines() {
                             eprintln!("  │    {}", line);
                         }
                         eprintln!("  │");
-                        eprintln!("  │  {} {}", "⚔ Attack:".red().bold(), "");
+                        eprintln!("  │  {} {}", "[atk] Attack:".red().bold(), "");
                         for line in enhanced.attack_scenario.lines() {
                             eprintln!("  │    {}", line);
                         }
                         eprintln!("  │");
-                        eprintln!("  │  {} {}", "💻 PoC Exploit:".yellow().bold(), "");
+                        eprintln!("  │  {} {}", "[code] PoC Exploit:".yellow().bold(), "");
                         for line in enhanced.proof_of_concept.lines() {
                             eprintln!("  │    {}", line);
                         }
                         eprintln!("  │");
-                        eprintln!("  │  {} {}", "✏ Fix:".green().bold(), "");
+                        eprintln!("  │  {} {}", "[edit] Fix:".green().bold(), "");
                         for line in enhanced.recommended_fix.lines() {
                             eprintln!("  │    {}", line);
                         }
                         eprintln!("  │");
-                        eprintln!("  │  {} {}", "💰 Impact:".bright_magenta().bold(), "");
+                        eprintln!("  │  {} {}", "[impact] Impact:".bright_magenta().bold(), "");
                         for line in enhanced.economic_impact.lines() {
                             eprintln!("  │    {}", line);
                         }
                         eprintln!("  └──────────────────────────────────────────────────────────────────────────────┘");
                     }
                     Err(e) => {
-                        eprintln!("  │  {} {} — {}", "✗".red(), id, e);
+                        eprintln!("  │  {} {} - {}", "X".red(), id, e);
                     }
                 }
             }
@@ -617,7 +615,7 @@ async fn cmd_scan(path: &str, format: &str, min_severity: &str, ai: bool, api_ke
         // Print secure code fixes if --fix is enabled
         if !fixes.is_empty() {
             eprintln!("\n  ╔══════════════════════════════════════════════════════════════════════════════╗");
-            eprintln!("  ║  🔧  SECURE CODE FIXES                                                     ║");
+            eprintln!("  ║  [fix]  SECURE CODE FIXES                                                     ║");
             eprintln!("  ╚══════════════════════════════════════════════════════════════════════════════╝");
             for fix_item in &fixes {
                 let finding = findings.iter().find(|f| f.id == fix_item.vulnerability_id);
@@ -625,12 +623,12 @@ async fn cmd_scan(path: &str, format: &str, min_severity: &str, ai: bool, api_ke
                 eprintln!("\n  ┌──────────────────────────────────────────────────────────────────────────────┐");
                 eprintln!("  │  {}  {}  ", fix_item.vulnerability_id.bright_yellow().bold(), title.bright_white().bold());
                 eprintln!("  ├──────────────────────────────────────────────────────────────────────────────┤");
-                eprintln!("  │  {} {}", "📝 Explanation:".cyan().bold(), "");
+                eprintln!("  │  {} {}", "[note] Explanation:".cyan().bold(), "");
                 for line in fix_item.explanation.lines() {
                     eprintln!("  │    {}", line);
                 }
                 eprintln!("  │");
-                eprintln!("  │  {} {}", "✅ Secure Pattern:".green().bold(), "");
+                eprintln!("  │  {} {}", "[ok] Secure Pattern:".green().bold(), "");
                 for line in fix_item.fixed_code.lines() {
                     eprintln!("  │    {}", line.bright_green());
                 }
@@ -645,7 +643,7 @@ async fn cmd_scan(path: &str, format: &str, min_severity: &str, ai: bool, api_ke
             eprintln!("  \u{255a}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{255d}");
             for poc_item in &pocs {
                 eprintln!("\n  \u{250c}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2510}");
-                eprintln!("  \u{2502}  {}  {:?} — {}  ", poc_item.vulnerability_id.bright_red().bold(), poc_item.difficulty, poc_item.scenario_name.bright_white().bold());
+                eprintln!("  \u{2502}  {}  {:?} - {}  ", poc_item.vulnerability_id.bright_red().bold(), poc_item.difficulty, poc_item.scenario_name.bright_white().bold());
                 eprintln!("  \u{251c}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2524}");
                 eprintln!("  \u{2502}  {} {}", "\u{1f4a5} Impact:".bright_magenta().bold(), poc_item.economic_impact);
                 eprintln!("  \u{2502}");
@@ -692,7 +690,7 @@ async fn cmd_scan(path: &str, format: &str, min_severity: &str, ai: bool, api_ke
                 eprintln!("  \u{2514}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2518}");
             }
         } else if simulate {
-            eprintln!("\n  {}  No HIGH or CRITICAL findings to simulate — program looks safe!", "✓".green());
+            eprintln!("\n  {}  No HIGH or CRITICAL findings to simulate - program looks safe!", "ok".green());
         }
 
         tui::print_verdict(c);
@@ -706,18 +704,16 @@ async fn cmd_scan(path: &str, format: &str, min_severity: &str, ai: bool, api_ke
         guard_report.risk_score,
     );
     if let Err(e) = dashboard::run_dashboard(state) {
-        eprintln!("  {} Dashboard error: {}", "✗".red(), e);
+        eprintln!("  {} Dashboard error: {}", "X".red(), e);
         std::process::exit(1);
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
 //  SCORE
-// ═══════════════════════════════════════════════════════════════════════════
 fn cmd_score(path: &str, name: Option<&str>, format: &str) {
     let source_path = Path::new(path);
     if !source_path.exists() {
-        eprintln!("  {} Path not found: {}", "✗".red(), path);
+        eprintln!("  {} Path not found: {}", "X".red(), path);
         std::process::exit(1);
     }
     let display_name = name.unwrap_or(path);
@@ -768,16 +764,14 @@ fn cmd_score(path: &str, name: Option<&str>, format: &str) {
         guard_report.risk_score,
     );
     if let Err(e) = dashboard::run_dashboard(state) {
-        eprintln!("  {} Dashboard error: {}", "✗".red(), e);
+        eprintln!("  {} Dashboard error: {}", "X".red(), e);
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
 //  GUARD
-// ═══════════════════════════════════════════════════════════════════════════
 fn cmd_guard(path: &str, format: &str, fail_on: &str) {
     let target = Path::new(path);
-    if !target.exists() { eprintln!("  {} Path not found: {}", "✗".red(), path); std::process::exit(1); }
+    if !target.exists() { eprintln!("  {} Path not found: {}", "X".red(), path); std::process::exit(1); }
 
     let scanner = shanon_guard::GuardScanner::new();
     let report = scanner.scan_directory(target);
@@ -786,7 +780,7 @@ fn cmd_guard(path: &str, format: &str, fail_on: &str) {
         println!("{}", report.to_json());
     } else if format == "human" || format == "dashboard" {
         tui::print_banner();
-        eprintln!("  {} Scanning dependencies in {}...", "🛡️".truecolor(80,200,255), path.bright_white());
+        eprintln!("  {} Scanning dependencies in {}...", "[shield]".truecolor(80,200,255), path.bright_white());
         report.print_colored();
     }
 
@@ -798,14 +792,12 @@ fn cmd_guard(path: &str, format: &str, fail_on: &str) {
     if fail { std::process::exit(1); }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
 //  FIREDANCER
-// ═══════════════════════════════════════════════════════════════════════════
 async fn cmd_firedancer(source: Option<&str>, rpc_url: &str, format: &str) {
     tui::print_banner();
     if let Some(src) = source {
         let path = Path::new(src);
-        if !path.exists() { eprintln!("  {} Path not found: {}", "✗".red(), src); std::process::exit(1); }
+        if !path.exists() { eprintln!("  {} Path not found: {}", "X".red(), src); std::process::exit(1); }
         eprintln!("  {} Analyzing Firedancer compatibility...", "🔥".truecolor(255,140,0));
         let checker = firedancer_monitor::compatibility::FiredancerCompatChecker::new();
         match checker.analyze_source(path) {
@@ -815,30 +807,28 @@ async fn cmd_firedancer(source: Option<&str>, rpc_url: &str, format: &str) {
                 eprintln!("  Score: {}/100  Grade: {}", sc.bold(), report.grade.cyan().bold());
                 for w in &report.warnings {
                     if let firedancer_monitor::compatibility::CompatWarning::RuntimeDifference { diff_id, title, severity, mitigation, .. } = w {
-                        eprintln!("  {} [{}] {} — {}", severity.red(), diff_id, title, mitigation.truecolor(100,116,139));
+                        eprintln!("  {} [{}] {} - {}", severity.red(), diff_id, title, mitigation.truecolor(100,116,139));
                     }
                 }
             }
-            Err(e) => { eprintln!("  {} {}", "✗".red(), e); std::process::exit(1); }
+            Err(e) => { eprintln!("  {} {}", "X".red(), e); std::process::exit(1); }
         }
     } else {
         let mut mon = firedancer_monitor::FiredancerMonitor::new(rpc_url.to_string());
         match mon.monitor_validator().await {
             Ok(r) => eprintln!("  Health: {}/100  Issues: {}", r.validator_health_score, r.findings.len()),
-            Err(e) => eprintln!("  {} {}", "✗".red(), e),
+            Err(e) => eprintln!("  {} {}", "X".red(), e),
         }
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
 //  CPI GRAPH
-// ═══════════════════════════════════════════════════════════════════════════
 fn cmd_cpi(program_id: &str, source: Option<&str>, format: &str) {
     tui::print_banner();
     if let Some(src) = source {
         let mut code = String::new();
         collect_rs(Path::new(src), &mut code);
-        if code.is_empty() { eprintln!("  {} No .rs files", "✗".red()); std::process::exit(1); }
+        if code.is_empty() { eprintln!("  {} No .rs files", "X".red()); std::process::exit(1); }
         let graph = cpi_analyzer::CPIDependencyGraph::build_from_source(program_id, &code, None);
         if format == "json" { println!("{}", serde_json::to_string_pretty(&graph).unwrap_or_default()); return; }
         if format == "d3" { println!("{}", graph.to_d3_json()); return; }
@@ -849,9 +839,7 @@ fn cmd_cpi(program_id: &str, source: Option<&str>, format: &str) {
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
 //  TOKEN SCAN
-// ═══════════════════════════════════════════════════════════════════════════
 fn cmd_token(mint: &str, source: Option<&str>, rpc_url: &str, format: &str) {
     use token_security_expert::scanner::{TokenRiskScanner, OnChainTokenChecks};
     tui::print_banner();
@@ -866,13 +854,11 @@ fn cmd_token(mint: &str, source: Option<&str>, rpc_url: &str, format: &str) {
             eprintln!("  Risk: {}/100  Grade: {}  Rug: {:.0}%",
                 r.risk_score.to_string().truecolor(rc.0,rc.1,rc.2).bold(), r.grade.cyan(), r.rug_probability * 100.0);
         }
-        Err(e) => { eprintln!("  {} {}", "✗".red(), e); std::process::exit(1); }
+        Err(e) => { eprintln!("  {} {}", "X".red(), e); std::process::exit(1); }
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
 //  WATCH
-// ═══════════════════════════════════════════════════════════════════════════
 async fn cmd_watch(pid: &str, discord: Option<&str>, slack: Option<&str>, telegram: Option<&str>, chat_id: Option<&str>, interval: u64, rpc_url: &str) {
     use shanon_monitor::alerts::{AlertSender, WebhookConfig, WebhookPlatform};
     use shanon_monitor::authority_watcher::{AuthorityWatcher, WatcherConfig};
@@ -883,32 +869,30 @@ async fn cmd_watch(pid: &str, discord: Option<&str>, slack: Option<&str>, telegr
     if let Some(u) = slack { wh.push(WebhookConfig { platform: WebhookPlatform::Slack, url: u.to_string(), chat_id: None }); }
     if let Some(u) = telegram {
         let cid = chat_id.map(|s| s.to_string());
-        if cid.is_none() { eprintln!("  {} --chat-id required", "✗".red()); std::process::exit(1); }
+        if cid.is_none() { eprintln!("  {} --chat-id required", "X".red()); std::process::exit(1); }
         wh.push(WebhookConfig { platform: WebhookPlatform::Telegram, url: u.to_string(), chat_id: cid });
     }
     let cfg = WatcherConfig { rpc_url: rpc_url.to_string(), program_ids: vec![pid.to_string()], poll_interval_secs: interval, max_polls: 0 };
     let sender = AlertSender::new(wh);
     let mut w = AuthorityWatcher::new(cfg, sender);
-    if let Err(e) = w.run().await { eprintln!("  {} {}", "✗".red(), e); std::process::exit(1); }
+    if let Err(e) = w.run().await { eprintln!("  {} {}", "X".red(), e); std::process::exit(1); }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
 //  VERIFY
-// ═══════════════════════════════════════════════════════════════════════════
 fn cmd_verify(pid: &str, source: Option<&str>, compliance: Option<&str>, rpc_url: &str, format: &str) {
     use shanon_verify::{VerificationEngine, VerifyConfig};
     tui::print_banner();
     let src = match source {
         Some(p) => std::path::PathBuf::from(p),
-        None => { eprintln!("  {} --source required", "✗".red()); std::process::exit(1); }
+        None => { eprintln!("  {} --source required", "X".red()); std::process::exit(1); }
     };
-    if !src.exists() { eprintln!("  {} Path not found", "✗".red()); std::process::exit(1); }
+    if !src.exists() { eprintln!("  {} Path not found", "X".red()); std::process::exit(1); }
     let fw = compliance.map(|c| match c.to_lowercase().as_str() {
         "soc2" => compliance_reporter::ComplianceFramework::SOC2,
         "iso27001" | "iso" => compliance_reporter::ComplianceFramework::ISO27001,
         "owasp" => compliance_reporter::ComplianceFramework::OWASPSCS,
         "solana" | "sf" => compliance_reporter::ComplianceFramework::SolanaFoundation,
-        _ => { eprintln!("  {} Unknown framework", "✗".red()); std::process::exit(1); }
+        _ => { eprintln!("  {} Unknown framework", "X".red()); std::process::exit(1); }
     });
     let name = src.file_name().and_then(|n| n.to_str()).unwrap_or("program");
     let cfg = VerifyConfig { rpc_url: rpc_url.to_string(), compliance_framework: fw, include_source_match: true };
@@ -923,13 +907,11 @@ fn cmd_verify(pid: &str, source: Option<&str>, compliance: Option<&str>, rpc_url
             };
             eprintln!("  {} Tier: {}  Score: {}/100", pid.cyan(), tier, r.security_summary.security_score);
         }
-        Err(e) => { eprintln!("  {} {}", "✗".red(), e); std::process::exit(1); }
+        Err(e) => { eprintln!("  {} {}", "X".red(), e); std::process::exit(1); }
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
 //  Shared Helpers
-// ═══════════════════════════════════════════════════════════════════════════
 fn severity_counts(f: &[program_analyzer::VulnerabilityFinding]) -> (usize, usize, usize, usize) {
     let c = f.iter().filter(|x| x.severity >= 5).count();
     let h = f.iter().filter(|x| x.severity == 4).count();
@@ -977,9 +959,7 @@ fn collect_rs(dir: &Path, buf: &mut String) {
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
 //  SARIF Output Generator (Static Analysis Results Interchange Format v2.1.0)
-// ═══════════════════════════════════════════════════════════════════════════
 fn generate_sarif(
     findings: &[program_analyzer::VulnerabilityFinding],
     target: &str,
@@ -1040,7 +1020,7 @@ fn generate_sarif(
                 "level": severity_to_sarif_level(f.severity),
                 "message": {
                     "text": &f.description,
-                    "markdown": format!("**{}** — {}\n\n**Attack:** {}\n\n**Fix:** {}",
+                    "markdown": format!("**{}** - {}\n\n**Attack:** {}\n\n**Fix:** {}",
                         f.vuln_type, f.description, f.attack_scenario, f.secure_fix)
                 },
                 "locations": [{
@@ -1102,9 +1082,7 @@ fn generate_sarif(
     })
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
 //  Markdown Report Generator
-// ═══════════════════════════════════════════════════════════════════════════
 fn generate_markdown_report(
     findings: &[program_analyzer::VulnerabilityFinding],
     target: &str,
@@ -1123,7 +1101,7 @@ fn generate_markdown_report(
     let sev_emoji = |s: u8| match s { 5 => "🔴", 4 => "🟠", 3 => "🟡", _ => "🔵" };
 
     let mut md = String::new();
-    md.push_str("# 🛡️ Shanon Security Audit Report\n\n");
+    md.push_str("# [shield] Shanon Security Audit Report\n\n");
     md.push_str(&format!("**Target:** `{}`  \n", target));
     md.push_str(&format!("**Duration:** {:.1}s  \n", elapsed.as_secs_f64()));
     md.push_str(&format!("**Score:** {} / 100 (Grade: **{}**)  \n\n", score, grade));
@@ -1138,21 +1116,21 @@ fn generate_markdown_report(
     md.push_str(&format!("| **Total** | **{}** |\n\n", findings.len()));
 
     if findings.is_empty() {
-        md.push_str("> ✅ **No vulnerabilities detected.** The program passed all security checks.\n\n");
+        md.push_str("> [ok] **No vulnerabilities detected.** The program passed all security checks.\n\n");
         return md;
     }
 
     md.push_str("---\n\n## 🔍 Detailed Findings\n\n");
 
     for (i, f) in findings.iter().enumerate() {
-        md.push_str(&format!("### {}. {} {} — {}\n\n", i + 1, sev_emoji(f.severity), f.id, f.vuln_type));
+        md.push_str(&format!("### {}. {} {} - {}\n\n", i + 1, sev_emoji(f.severity), f.id, f.vuln_type));
         md.push_str(&format!("**Severity:** {} | **Confidence:** {}% | **Category:** {}\n\n",
             sev_label(f.severity), f.confidence, f.category));
         if let Some(ref cwe) = f.cwe {
             md.push_str(&format!("**CWE:** [{cwe}](https://cwe.mitre.org/data/definitions/{}.html)  \n",
                 cwe.trim_start_matches("CWE-")));
         }
-        md.push_str(&format!("**Location:** `{}` → `{}()` (line {})  \n\n",
+        md.push_str(&format!("**Location:** `{}` -> `{}()` (line {})  \n\n",
             f.location, f.function_name, f.line_number));
 
         md.push_str(&format!("**Description:**  \n{}\n\n", f.description));
@@ -1168,7 +1146,7 @@ fn generate_markdown_report(
         md.push_str("\n```\n\n");
 
         if let Some(ref incident) = f.real_world_incident {
-            md.push_str(&format!("**Real-World Incident:** {} — {} ({})\n\n",
+            md.push_str(&format!("**Real-World Incident:** {} - {} ({})\n\n",
                 incident.project, incident.loss, incident.date));
         }
 
@@ -1183,18 +1161,16 @@ fn generate_markdown_report(
             i + 1, f.id, f.vuln_type, sev_label(f.severity), f.location, f.line_number));
     }
     md.push_str("\n---\n\n");
-    md.push_str("*Generated by [Shanon](https://shanon.security) — Enterprise-Grade Solana Security Platform*\n");
+    md.push_str("*Generated by [Shanon](https://shanon.security) - Enterprise-Grade Solana Security Platform*\n");
 
     md
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-//  ORCHESTRATE — Full pipeline: scan → consensus → strategy → report
-// ═══════════════════════════════════════════════════════════════════════════
+//  ORCHESTRATE - Full pipeline: scan -> consensus -> strategy -> report
 async fn cmd_orchestrate(path: &str, format: &str, min_severity: &str, api_key: Option<&str>, model: &str) {
     let source_path = Path::new(path);
     if !source_path.exists() {
-        eprintln!("  {} Path not found: {}", "✗".red(), path);
+        eprintln!("  {} Path not found: {}", "X".red(), path);
         std::process::exit(1);
     }
 
@@ -1206,7 +1182,7 @@ async fn cmd_orchestrate(path: &str, format: &str, min_severity: &str, api_key: 
     let timer = Instant::now();
     let analyzer = match program_analyzer::ProgramAnalyzer::new(source_path) {
         Ok(a) => a,
-        Err(e) => { eprintln!("  {} Init failed: {}", "✗".red(), e); std::process::exit(1); }
+        Err(e) => { eprintln!("  {} Init failed: {}", "X".red(), e); std::process::exit(1); }
     };
     let mut findings = analyzer.scan_for_vulnerabilities();
     let scan_elapsed = timer.elapsed();
@@ -1315,18 +1291,18 @@ async fn cmd_orchestrate(path: &str, format: &str, min_severity: &str, api_key: 
     } else {
         // Human-readable summary
         eprintln!("\n  ══════════════════════════════════════════════════════════════");
-        eprintln!("  {}  Orchestrated Pipeline Complete", "✓".green());
+        eprintln!("  {}  Orchestrated Pipeline Complete", "ok".green());
         eprintln!("  ──────────────────────────────────────────────────────────────");
         eprintln!("    Total findings:    {}", findings.len());
         eprintln!("    Consensus confirmed: {}", confirmed);
 
         for (id, cr) in &consensus_results {
             let icon = match cr.final_verdict {
-                consensus_engine::Verdict::Confirmed => "✅",
-                consensus_engine::Verdict::Rejected => "❌",
-                consensus_engine::Verdict::Uncertain => "❓",
+                consensus_engine::Verdict::Confirmed => "[ok]",
+                consensus_engine::Verdict::Rejected => "[no]",
+                consensus_engine::Verdict::Uncertain => "[??]",
             };
-            eprintln!("    {} {} — {:?} (confidence: {:.0}%)",
+            eprintln!("    {} {} - {:?} (confidence: {:.0}%)",
                 icon, id, cr.final_verdict, cr.confidence_score * 100.0);
         }
 
@@ -1334,8 +1310,8 @@ async fn cmd_orchestrate(path: &str, format: &str, min_severity: &str, api_key: 
             eprintln!("\n    Exploit Strategies:");
             for (id, result) in &strategy_results {
                 match result {
-                    Ok(s) => eprintln!("      {} {} → {}", "⚔".red(), id, s.attack_vector),
-                    Err(e) => eprintln!("      {} {} — {}", "✗".red(), id, e),
+                    Ok(s) => eprintln!("      {} {} -> {}", "+".red(), id, s.attack_vector),
+                    Err(e) => eprintln!("      {} {} - {}", "X".red(), id, e),
                 }
             }
         }
@@ -1353,21 +1329,19 @@ async fn cmd_orchestrate(path: &str, format: &str, min_severity: &str, api_key: 
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-//  SCAN-REPO — Clone a remote Git repository and run the full scan pipeline
-// ═══════════════════════════════════════════════════════════════════════════
+//  SCAN-REPO - Clone a remote Git repository and run the full scan pipeline
 async fn cmd_scan_repo(url: &str, branch: Option<&str>, format: &str, min_severity: &str) {
     eprintln!("\n  {}  Cloning repository: {}", "📦".to_string(), url);
     let mut scanner = git_scanner::GitScanner::new();
     let repo_path = match scanner.clone_repo(url, branch) {
         Ok(p) => p,
         Err(e) => {
-            eprintln!("  {} Failed to clone: {:?}", "✗".red(), e);
+            eprintln!("  {} Failed to clone: {:?}", "X".red(), e);
             std::process::exit(1);
         }
     };
     let path_str = repo_path.to_string_lossy().to_string();
-    eprintln!("  {}  Cloned to: {}", "✓".green(), path_str);
+    eprintln!("  {}  Cloned to: {}", "ok".green(), path_str);
 
     // Run the standard scan on the cloned repo (no AI/fix/poc/simulate by default)
     cmd_scan(&path_str, format, min_severity, false, None, "moonshotai/kimi-k2.5", false, false, false, false, false, false).await;
@@ -1386,17 +1360,15 @@ async fn cmd_scan_repo(url: &str, branch: Option<&str>, format: &str, min_severi
     eprintln!("  {}  Temporary clone cleaned up", "🧹".to_string());
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-//  BENCHMARK — Run timed performance benchmarks for the analysis pipeline
-// ═══════════════════════════════════════════════════════════════════════════
+//  BENCHMARK - Run timed performance benchmarks for the analysis pipeline
 fn cmd_benchmark(path: &str, iterations: usize) {
     let source_path = Path::new(path);
     if !source_path.exists() {
-        eprintln!("  {} Path not found: {}", "✗".red(), path);
+        eprintln!("  {} Path not found: {}", "X".red(), path);
         std::process::exit(1);
     }
 
-    eprintln!("\n  {}  Running {} benchmark iterations on: {}", "⏱️".to_string(), iterations, path);
+    eprintln!("\n  {}  Running {} benchmark iterations on: {}", "[timer]".to_string(), iterations, path);
 
     let mut suite = benchmark_suite::BenchmarkSuite::default_suite();
 
@@ -1418,13 +1390,11 @@ fn cmd_benchmark(path: &str, iterations: usize) {
     suite.print_summary();
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-//  VERIFY-FORMAL — Run the full formal verification pipeline
-// ═══════════════════════════════════════════════════════════════════════════
+//  VERIFY-FORMAL - Run the full formal verification pipeline
 async fn cmd_verify_formal(path: &str, format: &str) {
     let source_path = std::path::Path::new(path);
     if !source_path.exists() {
-        eprintln!("  {} Path not found: {}", "✗".red(), path);
+        eprintln!("  {} Path not found: {}", "X".red(), path);
         std::process::exit(1);
     }
 
@@ -1439,7 +1409,7 @@ async fn cmd_verify_formal(path: &str, format: &str) {
         Ok(report) => {
             let failed = report.failed_properties().len();
             let verified = report.verified_properties().len();
-            eprintln!("  │  {} Kani: {} verified, {} failed", "✓".green(), verified, failed);
+            eprintln!("  │  {} Kani: {} verified, {} failed", "ok".green(), verified, failed);
             results.push(serde_json::json!({
                 "engine": "kani",
                 "status": format!("{:?}", report.status),
@@ -1448,7 +1418,7 @@ async fn cmd_verify_formal(path: &str, format: &str) {
             }));
         }
         Err(e) => {
-            eprintln!("  │  {} Kani: {:?}", "⚠️".yellow(), e);
+            eprintln!("  │  {} Kani: {:?}", "[warn]".yellow(), e);
             results.push(serde_json::json!({"engine": "kani", "status": "error", "error": format!("{:?}", e)}));
         }
     }
@@ -1460,7 +1430,7 @@ async fn cmd_verify_formal(path: &str, format: &str) {
         Ok(report) => {
             let passed = report.passed_rules().len();
             let failed = report.failed_rules().len();
-            eprintln!("  │  {} Certora: {} passed, {} failed", "✓".green(), passed, failed);
+            eprintln!("  │  {} Certora: {} passed, {} failed", "ok".green(), passed, failed);
             results.push(serde_json::json!({
                 "engine": "certora",
                 "passed_rules": passed,
@@ -1468,7 +1438,7 @@ async fn cmd_verify_formal(path: &str, format: &str) {
             }));
         }
         Err(e) => {
-            eprintln!("  │  {} Certora: {:?}", "⚠️".yellow(), e);
+            eprintln!("  │  {} Certora: {:?}", "[warn]".yellow(), e);
             results.push(serde_json::json!({"engine": "certora", "status": "error", "error": format!("{:?}", e)}));
         }
     }
@@ -1478,7 +1448,7 @@ async fn cmd_verify_formal(path: &str, format: &str) {
     let mut wacana = wacana_analyzer::WacanaAnalyzer::new(wacana_analyzer::WacanaConfig::default());
     match wacana.analyze_program(source_path) {
         Ok(report) => {
-            eprintln!("  │  {} Wacana: {} paths, {} findings", "✓".green(), report.total_paths_explored, report.findings.len());
+            eprintln!("  │  {} Wacana: {} paths, {} findings", "ok".green(), report.total_paths_explored, report.findings.len());
             results.push(serde_json::json!({
                 "engine": "wacana",
                 "paths_explored": report.total_paths_explored,
@@ -1486,7 +1456,7 @@ async fn cmd_verify_formal(path: &str, format: &str) {
             }));
         }
         Err(e) => {
-            eprintln!("  │  {} Wacana: {:?}", "⚠️".yellow(), e);
+            eprintln!("  │  {} Wacana: {:?}", "[warn]".yellow(), e);
             results.push(serde_json::json!({"engine": "wacana", "status": "error", "error": format!("{:?}", e)}));
         }
     }
@@ -1496,7 +1466,7 @@ async fn cmd_verify_formal(path: &str, format: &str) {
     let crux = crux_mir_analyzer::CruxMirAnalyzer::new();
     match crux.analyze_program(source_path).await {
         Ok(report) => {
-            eprintln!("  │  {} Crux-MIR: {} findings, {} instructions", "✓".green(), report.findings.len(), report.analyzed_instructions);
+            eprintln!("  │  {} Crux-MIR: {} findings, {} instructions", "ok".green(), report.findings.len(), report.analyzed_instructions);
             results.push(serde_json::json!({
                 "engine": "crux-mir",
                 "findings": report.findings.len(),
@@ -1504,12 +1474,12 @@ async fn cmd_verify_formal(path: &str, format: &str) {
             }));
         }
         Err(e) => {
-            eprintln!("  │  {} Crux-MIR: {:?}", "⚠️".yellow(), e);
+            eprintln!("  │  {} Crux-MIR: {:?}", "[warn]".yellow(), e);
             results.push(serde_json::json!({"engine": "crux-mir", "status": "error", "error": format!("{:?}", e)}));
         }
     }
 
-    // 5) FV Scanner — 4-layer Z3-backed formal verification pipeline
+    // 5) FV Scanner - 4-layer Z3-backed formal verification pipeline
     //    Layer 1: Arithmetic & Logic (Kani + AST overflow proofs)
     //    Layer 2: Symbolic Execution (Crux-MIR + Z3 SMT proofs)
     //    Layer 3: Cross-Program Safety (account schema invariants via Z3)
@@ -1537,11 +1507,11 @@ async fn cmd_verify_formal(path: &str, format: &str) {
                         eprintln!("     {} Layer {}: {}...", "⟳".to_string(), layer, name);
                     }
                     fv_scanner_core::ScanProgress::Completed { layer, success } => {
-                        let icon = if success { "✓".green().to_string() } else { "✗".red().to_string() };
+                        let icon = if success { "ok".green().to_string() } else { "X".red().to_string() };
                         eprintln!("     {} Layer {} complete", icon, layer);
                     }
                     fv_scanner_core::ScanProgress::Error { layer, ref message } => {
-                        eprintln!("     {} Layer {}: {}", "⚠️".yellow(), layer, message);
+                        eprintln!("     {} Layer {}: {}", "[warn]".yellow(), layer, message);
                     }
                     _ => {}
                 }
@@ -1579,11 +1549,11 @@ async fn cmd_verify_formal(path: &str, format: &str) {
                         "state_transitions": l4.z3_proofs.len(),
                     });
                 }
-                eprintln!("     {} FV Scanner: completed in {}ms", "✓".green(), fv_result.duration_ms);
+                eprintln!("     {} FV Scanner: completed in {}ms", "ok".green(), fv_result.duration_ms);
                 results.push(fv_json);
             }
             Err(e) => {
-                eprintln!("     {} FV Scanner: {:?}", "⚠️".yellow(), e);
+                eprintln!("     {} FV Scanner: {:?}", "[warn]".yellow(), e);
                 results.push(serde_json::json!({"engine": "fv-scanner", "status": "error", "error": format!("{:?}", e)}));
             }
         }
@@ -1591,7 +1561,7 @@ async fn cmd_verify_formal(path: &str, format: &str) {
     }
 
     let elapsed = timer.elapsed();
-    eprintln!("\n  {}  Formal verification completed in {:.2}s", "✓".green(), elapsed.as_secs_f64());
+    eprintln!("\n  {}  Formal verification completed in {:.2}s", "ok".green(), elapsed.as_secs_f64());
 
     if format == "json" {
         println!("{}", serde_json::to_string_pretty(&serde_json::json!({
@@ -1601,13 +1571,11 @@ async fn cmd_verify_formal(path: &str, format: &str) {
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-//  FUZZ — Run fuzzing analysis pipeline
-// ═══════════════════════════════════════════════════════════════════════════
+//  FUZZ - Run fuzzing analysis pipeline
 fn cmd_fuzz(path: &str, iterations: usize, format: &str) {
     let source_path = std::path::Path::new(path);
     if !source_path.exists() {
-        eprintln!("  {} Path not found: {}", "✗".red(), path);
+        eprintln!("  {} Path not found: {}", "X".red(), path);
         std::process::exit(1);
     }
 
@@ -1620,7 +1588,7 @@ fn cmd_fuzz(path: &str, iterations: usize, format: &str) {
     let mut trident = trident_fuzzer::TridentFuzzer::new();
     match trident.fuzz_program(source_path) {
         Ok(report) => {
-            eprintln!("  │  {} Trident: {} iters, {} findings ({} crit, {} high)", "✓".green(),
+            eprintln!("  │  {} Trident: {} iters, {} findings ({} crit, {} high)", "ok".green(),
                 report.total_iterations, report.findings.len(), report.critical_count, report.high_count);
             results.push(serde_json::json!({
                 "engine": "trident",
@@ -1631,7 +1599,7 @@ fn cmd_fuzz(path: &str, iterations: usize, format: &str) {
             }));
         }
         Err(e) => {
-            eprintln!("  │  {} Trident: {:?}", "⚠️".yellow(), e);
+            eprintln!("  │  {} Trident: {:?}", "[warn]".yellow(), e);
             results.push(serde_json::json!({"engine": "trident", "status": "error", "error": format!("{:?}", e)}));
         }
     }
@@ -1643,7 +1611,7 @@ fn cmd_fuzz(path: &str, iterations: usize, format: &str) {
             let mut fds = fuzzdelsol::FuzzDelSol::with_config(fuzzdelsol::FuzzConfig::default());
             match fds.fuzz_binary(&binary_path) {
                 Ok(report) => {
-                    eprintln!("  │  {} FuzzDelSol: {} violations", "✓".green(),
+                    eprintln!("  │  {} FuzzDelSol: {} violations", "ok".green(),
                         report.violations.len());
                     results.push(serde_json::json!({
                         "engine": "fuzzdelsol",
@@ -1651,7 +1619,7 @@ fn cmd_fuzz(path: &str, iterations: usize, format: &str) {
                     }));
                 }
                 Err(e) => {
-                    eprintln!("  │  {} FuzzDelSol: {:?}", "⚠️".yellow(), e);
+                    eprintln!("  │  {} FuzzDelSol: {:?}", "[warn]".yellow(), e);
                     results.push(serde_json::json!({"engine": "fuzzdelsol", "status": "error", "error": format!("{:?}", e)}));
                 }
             }
@@ -1685,7 +1653,7 @@ fn cmd_fuzz(path: &str, iterations: usize, format: &str) {
             execution_time_us: 0,
         }
     });
-    eprintln!("     {} SecurityFuzzer: {} execs, {} findings", "✓".green(),
+    eprintln!("     {} SecurityFuzzer: {} execs, {} findings", "ok".green(),
         stats.total_executions, stats.findings.len());
     results.push(serde_json::json!({
         "engine": "security-fuzzer",
@@ -1695,7 +1663,7 @@ fn cmd_fuzz(path: &str, iterations: usize, format: &str) {
     }));
 
     let elapsed = timer.elapsed();
-    eprintln!("\n  {}  Fuzzing completed in {:.2}s", "✓".green(), elapsed.as_secs_f64());
+    eprintln!("\n  {}  Fuzzing completed in {:.2}s", "ok".green(), elapsed.as_secs_f64());
 
     if format == "json" {
         println!("{}", serde_json::to_string_pretty(&serde_json::json!({
@@ -1705,17 +1673,15 @@ fn cmd_fuzz(path: &str, iterations: usize, format: &str) {
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-//  ECONOMIC-VERIFY — Run DeFi economic invariant verification
-// ═══════════════════════════════════════════════════════════════════════════
+//  ECONOMIC-VERIFY - Run DeFi economic invariant verification
 fn cmd_economic_verify(path: &str, format: &str) {
     let source_path = std::path::Path::new(path);
     if !source_path.exists() {
-        eprintln!("  {} Path not found: {}", "✗".red(), path);
+        eprintln!("  {} Path not found: {}", "X".red(), path);
         std::process::exit(1);
     }
 
-    eprintln!("\n  {}  Running DeFi economic invariant verification on: {}", "💰".to_string(), path);
+    eprintln!("\n  {}  Running DeFi economic invariant verification on: {}", "+".to_string(), path);
     let timer = std::time::Instant::now();
 
     let z3_config = z3::Config::new();
@@ -1741,10 +1707,10 @@ fn cmd_economic_verify(path: &str, format: &str) {
     for result in &all_results {
         if result.verified {
             passed += 1;
-            eprintln!("  {} {:?}: {}", "✓".green(), result.invariant_type, result.description);
+            eprintln!("  {} {:?}: {}", "ok".green(), result.invariant_type, result.description);
         } else {
             failed += 1;
-            eprintln!("  {} {:?}: {}", "✗".red(), result.invariant_type, result.description);
+            eprintln!("  {} {:?}: {}", "X".red(), result.invariant_type, result.description);
             if let Some(ref ce) = result.counterexample {
                 eprintln!("    Counterexample: {:?}", ce);
             }
@@ -1760,7 +1726,7 @@ fn cmd_economic_verify(path: &str, format: &str) {
 
     let elapsed = timer.elapsed();
     eprintln!("\n  {}  Economic verification: {} passed, {} failed ({:.2}s)",
-        if failed == 0 { "✓".green() } else { "✗".red() }, passed, failed, elapsed.as_secs_f64());
+        if failed == 0 { "ok".green() } else { "X".red() }, passed, failed, elapsed.as_secs_f64());
 
     if format == "json" {
         println!("{}", serde_json::to_string_pretty(&serde_json::json!({
