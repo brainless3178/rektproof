@@ -70,6 +70,8 @@
 //! | [`phase_timing`] | Per-phase execution timing |
 //! | [`vuln_registry`] | Central vulnerability ID registry |
 //! | [`defi_detector`] | DeFi protocol-specific detection |
+//! | [`converters`] | Engine→VulnerabilityFinding converters |
+//! | [`pipeline`] | Finding enrichment + cross-phase dedup |
 //! | [`config`] | Analyzer configuration |
 //! | [`metrics`] | Runtime metrics collection |
 
@@ -133,6 +135,8 @@ pub mod account_aliasing;
 // ─── Infrastructure ───────────────────────────────────────────────────────
 pub mod phase_timing;
 pub mod vuln_registry;
+pub mod converters;
+pub mod pipeline;
 
 // ─── Test modules ─────────────────────────────────────────────────────────
 #[cfg(test)]
@@ -342,7 +346,7 @@ impl ProgramAnalyzer {
                     let converted: Vec<VulnerabilityFinding> = report
                         .findings
                         .into_iter()
-                        .map(sec3_finding_to_vulnerability)
+                        .map(converters::sec3_finding_to_vulnerability)
                         .collect();
                     findings.extend(converted);
                 }
@@ -362,7 +366,7 @@ impl ProgramAnalyzer {
                     let converted: Vec<VulnerabilityFinding> = report
                         .findings
                         .into_iter()
-                        .map(anchor_finding_to_vulnerability)
+                        .map(converters::anchor_finding_to_vulnerability)
                         .collect();
                     findings.extend(converted);
                 }
@@ -443,7 +447,7 @@ impl ProgramAnalyzer {
                 Ok(flows) => {
                     let converted: Vec<VulnerabilityFinding> = flows
                         .into_iter()
-                        .map(taint_flow_to_vulnerability)
+                        .map(converters::taint_flow_to_vulnerability)
                         .collect();
                     findings.extend(converted);
                 }
@@ -948,54 +952,8 @@ impl ProgramAnalyzer {
         }
 
 
-        // ─── Finding Enrichment Pass ────────────────────────────────────────
-        // Augment descriptions with knowledge from expert systems.
-        for f in &mut findings {
-            // Account security enrichment
-            if let Some(insight) = account_security_expert::AccountSecurityExpert::get_insight_for_id(&f.id) {
-                if f.prevention.is_empty() {
-                    f.prevention = insight.secure_pattern.clone();
-                }
-                if f.attack_scenario.is_empty() {
-                    f.attack_scenario = insight.attack_vector.clone();
-                }
-            }
-            // DeFi security enrichment
-            if let Some(insight) = defi_security_expert::DeFiSecurityExpert::get_defense_for_id(&f.id) {
-                if f.prevention.is_empty() {
-                    f.prevention = insight.defense_strategy.clone();
-                }
-            }
-        }
-
-        // ── Cross-phase dedup ────────────────────────────────────────────
-        // Same (vuln_type, location, line_number) found by multiple phases?
-        // Keep only the highest-confidence version.
-        {
-            use std::collections::HashMap;
-            let mut best: HashMap<String, usize> = HashMap::new();
-            for (idx, f) in findings.iter().enumerate() {
-                let key = if f.line_number > 0 {
-                    format!("{}:{}:{}", f.vuln_type, f.location, f.line_number)
-                } else {
-                    format!("{}:{}:{}", f.vuln_type, f.location, f.function_name)
-                };
-                best.entry(key)
-                    .and_modify(|existing_idx| {
-                        if findings[idx].confidence > findings[*existing_idx].confidence {
-                            *existing_idx = idx;
-                        }
-                    })
-                    .or_insert(idx);
-            }
-            let keep: std::collections::HashSet<usize> = best.into_values().collect();
-            let mut idx = 0;
-            findings.retain(|_| {
-                let k = keep.contains(&idx);
-                idx += 1;
-                k
-            });
-        }
+        // ─── Post-processing: enrich + dedup ────────────────────────────────
+        pipeline::post_process(&mut findings);
 
         findings
     }
@@ -1468,261 +1426,14 @@ pub enum AnalyzerError {
     WalkDir(walkdir::Error),
 }
 
-// ─── Sec3 → VulnerabilityFinding conversion ─────────────────────────────────
+// Converter functions have been extracted to converters.rs module.
+// See: converters::sec3_finding_to_vulnerability
+// See: converters::anchor_finding_to_vulnerability
+// See: converters::taint_flow_to_vulnerability
 
-/// Convert a Sec3 finding into the standard VulnerabilityFinding format.
-///
-/// Maps Sec3 categories to SOL-xxx IDs in the existing detector namespace,
-/// preserving CWE mapping, severity, and source snippets.
-fn sec3_finding_to_vulnerability(f: sec3_analyzer::Sec3Finding) -> VulnerabilityFinding {
-    use sec3_analyzer::{Sec3Category, Sec3Severity};
 
-    // Map Sec3 severity to numeric (1-5) scale used by program-analyzer
-    let (severity, severity_label) = match f.severity {
-        Sec3Severity::Critical => (5, "Critical".to_string()),
-        Sec3Severity::High     => (4, "High".to_string()),
-        Sec3Severity::Medium   => (3, "Medium".to_string()),
-        Sec3Severity::Low      => (2, "Low".to_string()),
-        Sec3Severity::Info     => (1, "Info".to_string()),
-    };
 
-    // Map Sec3 categories to SOL-xxx IDs that don't collide with existing detectors
-    let (id, category, vuln_type) = match f.category {
-        Sec3Category::CloseAccountDrain => (
-            "SOL-070".to_string(),
-            "Account Safety".to_string(),
-            "Close Account Drain".to_string(),
-        ),
-        Sec3Category::DuplicateMutableAccounts => (
-            "SOL-071".to_string(),
-            "Account Safety".to_string(),
-            "Duplicate Mutable Accounts".to_string(),
-        ),
-        Sec3Category::UncheckedRemainingAccounts => (
-            "SOL-072".to_string(),
-            "Input Validation".to_string(),
-            "Unchecked Remaining Accounts".to_string(),
-        ),
-        Sec3Category::InsecurePDADerivation => (
-            "SOL-073".to_string(),
-            "Cryptographic".to_string(),
-            "Insecure PDA Derivation".to_string(),
-        ),
-        Sec3Category::ReInitialization => (
-            "SOL-074".to_string(),
-            "Account Safety".to_string(),
-            "Re-Initialization via init_if_needed".to_string(),
-        ),
-        Sec3Category::ArbitraryCPI => (
-            "SOL-075".to_string(),
-            "Access Control".to_string(),
-            "Arbitrary CPI Invocation".to_string(),
-        ),
-        Sec3Category::AccountConfusion => (
-            "SOL-076".to_string(),
-            "Type Safety".to_string(),
-            "Account Type Confusion".to_string(),
-        ),
-        Sec3Category::MissingDiscriminator => (
-            "SOL-077".to_string(),
-            "Type Safety".to_string(),
-            "Missing Discriminator Check".to_string(),
-        ),
-        Sec3Category::MissingRentExemption => (
-            "SOL-078".to_string(),
-            "Account Safety".to_string(),
-            "Missing Rent Exemption Check".to_string(),
-        ),
-        // These overlap with existing detectors — use existing SOL IDs
-        // so the deduplicator can merge them
-        Sec3Category::MissingOwnerCheck => (
-            "SOL-012".to_string(),
-            "Access Control".to_string(),
-            "Missing Owner Validation".to_string(),
-        ),
-        Sec3Category::MissingSignerCheck => (
-            "SOL-001".to_string(),
-            "Access Control".to_string(),
-            "Missing Signer Validation".to_string(),
-        ),
-        Sec3Category::IntegerOverflow => (
-            "SOL-006".to_string(),
-            "Arithmetic".to_string(),
-            "Integer Overflow/Underflow".to_string(),
-        ),
-    };
 
-    VulnerabilityFinding {
-        category,
-        vuln_type,
-        severity,
-        severity_label,
-        id,
-        cwe: Some(f.cwe),
-        location: f.file_path,
-        function_name: f.instruction,
-        line_number: f.line_number,
-        vulnerable_code: f.source_snippet.unwrap_or_default(),
-        description: f.description,
-        attack_scenario: String::new(),
-        real_world_incident: None,
-        secure_fix: f.fix_recommendation,
-        prevention: String::new(),
-        confidence: 50, // raw finding — will be adjusted by validation pipeline
-    }
-}
-
-// ─── Anchor → VulnerabilityFinding conversion ───────────────────────────────
-
-/// Convert an Anchor security finding into the standard VulnerabilityFinding format.
-fn anchor_finding_to_vulnerability(f: anchor_security_analyzer::report::AnchorFinding) -> VulnerabilityFinding {
-    use anchor_security_analyzer::report::{AnchorSeverity, AnchorViolation};
-
-    let (severity, severity_label) = match f.severity {
-        AnchorSeverity::Critical => (5, "Critical".to_string()),
-        AnchorSeverity::High     => (4, "High".to_string()),
-        AnchorSeverity::Medium   => (3, "Medium".to_string()),
-        AnchorSeverity::Low      => (2, "Low".to_string()),
-    };
-
-    // Net-new Anchor detectors get SOL-080+ IDs.
-    // Overlapping ones map to existing IDs for dedup.
-    let (id, category, vuln_type) = match f.violation {
-        // --- Net-new Anchor-specific detectors ---
-        AnchorViolation::WeakConstraint => (
-            "SOL-080".to_string(),
-            "Anchor Safety".to_string(),
-            "Weak Account Constraint".to_string(),
-        ),
-        AnchorViolation::InvalidTokenHook => (
-            "SOL-081".to_string(),
-            "Token Safety".to_string(),
-            "Invalid Token-2022 Transfer Hook".to_string(),
-        ),
-        AnchorViolation::MissingHasOne => (
-            "SOL-082".to_string(),
-            "Anchor Safety".to_string(),
-            "Missing has_one Constraint".to_string(),
-        ),
-        AnchorViolation::UnsafeConstraintExpression => (
-            "SOL-083".to_string(),
-            "Anchor Safety".to_string(),
-            "Unsafe Constraint Expression".to_string(),
-        ),
-        AnchorViolation::MissingBumpValidation => (
-            "SOL-084".to_string(),
-            "Cryptographic".to_string(),
-            "Missing Bump Validation".to_string(),
-        ),
-        AnchorViolation::MissingSpaceCalculation => (
-            "SOL-085".to_string(),
-            "Anchor Safety".to_string(),
-            "Missing Space Calculation".to_string(),
-        ),
-        AnchorViolation::MissingRentExemption => (
-            "SOL-086".to_string(),
-            "Account Safety".to_string(),
-            "Missing Rent Exemption".to_string(),
-        ),
-        AnchorViolation::UncheckedAccountType => (
-            "SOL-087".to_string(),
-            "Type Safety".to_string(),
-            "Unchecked Account Type".to_string(),
-        ),
-        // --- Overlap with existing detectors (use same SOL IDs for dedup) ---
-        AnchorViolation::MissingSignerCheck => (
-            "SOL-001".to_string(),
-            "Access Control".to_string(),
-            "Missing Signer Validation".to_string(),
-        ),
-        AnchorViolation::MissingOwnerCheck => (
-            "SOL-012".to_string(),
-            "Access Control".to_string(),
-            "Missing Owner Validation".to_string(),
-        ),
-        AnchorViolation::MissingPDAValidation => (
-            "SOL-073".to_string(),
-            "Cryptographic".to_string(),
-            "Missing PDA Validation".to_string(),
-        ),
-        AnchorViolation::MissingCPIGuard => (
-            "SOL-017".to_string(),
-            "Access Control".to_string(),
-            "Missing CPI Guard".to_string(),
-        ),
-        AnchorViolation::ReinitializationVulnerability => (
-            "SOL-074".to_string(),
-            "Account Safety".to_string(),
-            "Reinitialization Vulnerability".to_string(),
-        ),
-        AnchorViolation::MissingCloseGuard => (
-            "SOL-070".to_string(),
-            "Account Safety".to_string(),
-            "Missing Close Guard".to_string(),
-        ),
-    };
-
-    // Build function name from struct_name + field_name
-    let function_name = match (&f.struct_name, &f.field_name) {
-        (Some(s), Some(field)) => format!("{}::{}", s, field),
-        (Some(s), None) => s.clone(),
-        (None, Some(field)) => field.clone(),
-        (None, None) => "unknown".to_string(),
-    };
-
-    VulnerabilityFinding {
-        category,
-        vuln_type,
-        severity,
-        severity_label,
-        id,
-        cwe: Some(f.cwe),
-        location: f.file_path,
-        function_name,
-        line_number: f.line_number,
-        vulnerable_code: f.code_snippet,
-        description: format!("{} {}", f.description, f.risk_explanation),
-        attack_scenario: String::new(),
-        real_world_incident: None,
-        secure_fix: f.fix_recommendation,
-        prevention: f.anchor_pattern,
-        confidence: 50,
-    }
-}
-
-// ─── TaintFlow → VulnerabilityFinding conversion ────────────────────────────
-
-/// Convert a taint-analyzer TaintFlow into the standard VulnerabilityFinding format.
-fn taint_flow_to_vulnerability(flow: taint_analyzer::TaintFlow) -> VulnerabilityFinding {
-    let (severity, severity_label) = match flow.severity {
-        taint_analyzer::TaintSeverity::Critical => (5, "Critical".to_string()),
-        taint_analyzer::TaintSeverity::High     => (4, "High".to_string()),
-        taint_analyzer::TaintSeverity::Medium   => (3, "Medium".to_string()),
-        taint_analyzer::TaintSeverity::Low      => (2, "Low".to_string()),
-    };
-
-    let path_str = flow.path.join(" → ");
-    let location = flow.path.first().cloned().unwrap_or_default();
-
-    VulnerabilityFinding {
-        category: "Taint Analysis".to_string(),
-        vuln_type: format!("Tainted Data Flow: {:?} → {:?}", flow.source, flow.sink),
-        severity,
-        severity_label,
-        id: "SOL-092".to_string(),
-        cwe: Some("CWE-20".to_string()),
-        location,
-        function_name: String::new(),
-        line_number: 0,
-        vulnerable_code: path_str,
-        description: flow.description,
-        attack_scenario: String::new(),
-        real_world_incident: None,
-        secure_fix: flow.recommendation,
-        prevention: String::new(),
-        confidence: 45,
-    }
-}
 
 /// Convenience function for LSP / single-file analysis.
 ///
