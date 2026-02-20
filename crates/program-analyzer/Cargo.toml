@@ -22,6 +22,8 @@ toml = "0.8"
 rayon = "1.8"
 zeroize = { version = "1.3", features = ["zeroize_derive"] }
 once_cell = "1.19"
+tokio = { version = "1", features = ["rt"] }
+z3 = "0.12"
 sec3-analyzer = { path = "../experimental/sec3-analyzer" }
 anchor-security-analyzer = { path = "../experimental/anchor-security-analyzer" }
 dataflow-analyzer = { path = "../experimental/dataflow-analyzer" }
@@ -34,6 +36,11 @@ concolic-executor = { path = "../experimental/concolic-executor" }
 security-fuzzer = { path = "../experimental/security-fuzzer" }
 account-security-expert = { path = "../experimental/account-security-expert" }
 defi-security-expert = { path = "../experimental/defi-security-expert" }
+fv-layer1-verifier = { path = "../experimental/fv-layer1-verifier" }
+fv-layer2-verifier = { path = "../experimental/fv-layer2-verifier" }
+fv-layer3-verifier = { path = "../experimental/fv-layer3-verifier" }
+fv-layer4-verifier = { path = "../experimental/fv-layer4-verifier" }
+symbolic-engine = { path = "../experimental/symbolic-engine" }
 
 [dev-dependencies]
 criterion = "0.5"

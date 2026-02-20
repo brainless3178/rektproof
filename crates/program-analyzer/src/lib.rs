@@ -589,13 +589,280 @@ impl ProgramAnalyzer {
                 results
             });
 
-            // Collect all parallel results
+            // Collect all parallel results (batch 1)
             findings.extend(phase11.join().unwrap_or_default());
             findings.extend(phase12.join().unwrap_or_default());
             findings.extend(phase13.join().unwrap_or_default());
             findings.extend(phase14.join().unwrap_or_default());
             findings.extend(phase15.join().unwrap_or_default());
         });
+
+        // ── Phases 16–20: Formal Verification Layer (parallel batch 2) ──
+        // These integrate the fv-layer verifiers and symbolic engine that
+        // perform Z3-backed proofs on account schemas and state machines.
+        if let Some(ref dir) = self.program_dir {
+            let dir_16 = dir.clone();
+            let dir_17 = dir.clone();
+            let dir_18 = dir.clone();
+            let dir_19 = dir.clone();
+            let raw_sources_20 = self.raw_sources.clone();
+
+            std::thread::scope(|s| {
+                // Phase 16: FV Layer 1 — Kani-backed property verification +
+                //           arithmetic safety extraction
+                let phase16 = s.spawn(move || {
+                    let mut results = Vec::new();
+                    let rt = tokio::runtime::Builder::new_current_thread()
+                        .enable_all().build().unwrap();
+                    let config = fv_layer1_verifier::Layer1Config::default();
+                    let verifier = fv_layer1_verifier::Layer1Verifier::new(config);
+                    match rt.block_on(verifier.verify(&dir_16)) {
+                        Ok(report) => {
+                            for finding in report.findings {
+                                let (sev, label) = match finding.severity {
+                                    fv_layer1_verifier::Severity::Critical => (5, "Critical"),
+                                    fv_layer1_verifier::Severity::High => (4, "High"),
+                                    fv_layer1_verifier::Severity::Medium => (3, "Medium"),
+                                    fv_layer1_verifier::Severity::Low => (2, "Low"),
+                                    fv_layer1_verifier::Severity::Info => (1, "Informational"),
+                                };
+                                results.push(VulnerabilityFinding {
+                                    category: "Formal Verification".to_string(),
+                                    vuln_type: finding.description.clone(),
+                                    severity: sev,
+                                    severity_label: label.to_string(),
+                                    id: "SOL-FV-01".to_string(),
+                                    cwe: Some("CWE-682".to_string()),
+                                    location: finding.location.as_ref()
+                                        .map(|l| l.file.clone()).unwrap_or_default(),
+                                    function_name: finding.category.clone(),
+                                    line_number: finding.location.as_ref()
+                                        .map(|l| l.line as usize).unwrap_or(0),
+                                    vulnerable_code: finding.description.clone(),
+                                    description: finding.description,
+                                    attack_scenario: String::new(),
+                                    real_world_incident: None,
+                                    secure_fix: finding.recommendation,
+                                    prevention: String::new(),
+                                    confidence: 70,
+                                });
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("  {} FV Layer 1: {}", "⚠️".yellow(), e);
+                        }
+                    }
+                    results
+                });
+
+                // Phase 17: FV Layer 2 — Z3 SMT arithmetic overflow proofs
+                let phase17 = s.spawn(move || {
+                    let mut results = Vec::new();
+                    let rt = tokio::runtime::Builder::new_current_thread()
+                        .enable_all().build().unwrap();
+                    let verifier = fv_layer2_verifier::Layer2Verifier::new();
+                    match rt.block_on(verifier.verify(&dir_17)) {
+                        Ok(report) => {
+                            for proof in &report.z3_proofs {
+                                if proof.status == fv_layer2_verifier::ProofStatus::Violated {
+                                    results.push(VulnerabilityFinding {
+                                        category: "Formal Verification".to_string(),
+                                        vuln_type: format!("Z3 Arithmetic Proof Violation: {}", proof.property),
+                                        severity: 4,
+                                        severity_label: "High".to_string(),
+                                        id: "SOL-FV-02".to_string(),
+                                        cwe: Some("CWE-190".to_string()),
+                                        location: String::new(),
+                                        function_name: String::new(),
+                                        line_number: 0,
+                                        vulnerable_code: proof.property.clone(),
+                                        description: format!(
+                                            "Z3 proved that arithmetic property '{}' can be violated. \
+                                             Counterexample: {}",
+                                            proof.property,
+                                            proof.counterexample.as_deref().unwrap_or("(solver found model)")
+                                        ),
+                                        attack_scenario: String::new(),
+                                        real_world_incident: None,
+                                        secure_fix: "Use checked_add/checked_mul or validated inputs.".to_string(),
+                                        prevention: String::new(),
+                                        confidence: 80,
+                                    });
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("  {} FV Layer 2: {}", "⚠️".yellow(), e);
+                        }
+                    }
+                    results
+                });
+
+                // Phase 18: FV Layer 3 — Z3 account schema invariant verification
+                //           (solvency: reserved <= balance, supply integrity, etc.)
+                let phase18 = s.spawn(move || {
+                    let rt = tokio::runtime::Builder::new_current_thread()
+                        .enable_all().build().unwrap();
+                    let mut results = Vec::new();
+                    let config = fv_layer3_verifier::Layer3Config::default();
+                    let verifier = fv_layer3_verifier::Layer3Verifier::new(config);
+                    match rt.block_on(verifier.verify(&dir_18)) {
+                        Ok(report) => {
+                            for violation in &report.violations_found {
+                                let sev = if violation.contains("CRITICAL") { 5u8 }
+                                    else if violation.contains("HIGH") { 4 }
+                                    else { 3 };
+                                results.push(VulnerabilityFinding {
+                                    category: "Formal Verification".to_string(),
+                                    vuln_type: "Account Schema Invariant Violation".to_string(),
+                                    severity: sev,
+                                    severity_label: match sev {
+                                        5 => "Critical", 4 => "High", _ => "Medium",
+                                    }.to_string(),
+                                    id: "SOL-FV-03".to_string(),
+                                    cwe: Some("CWE-682".to_string()),
+                                    location: String::new(),
+                                    function_name: String::new(),
+                                    line_number: 0,
+                                    vulnerable_code: violation.clone(),
+                                    description: format!(
+                                        "Z3 invariant verification: {}. Schemas analyzed: {:?}",
+                                        violation, report.analyzed_schemas,
+                                    ),
+                                    attack_scenario: "Attacker crafts inputs that violate the data \
+                                        invariant (e.g., reserved > balance), draining funds.".to_string(),
+                                    real_world_incident: None,
+                                    secure_fix: "Add explicit invariant checks after every state mutation.".to_string(),
+                                    prevention: String::new(),
+                                    confidence: 75,
+                                });
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("  {} FV Layer 3: {}", "⚠️".yellow(), e);
+                        }
+                    }
+                    results
+                });
+
+                // Phase 19: FV Layer 4 — State machine transition verification
+                //           (unreachable states, unguarded transitions, missing terminal states)
+                let phase19 = s.spawn(move || {
+                    let mut results = Vec::new();
+                    let rt = tokio::runtime::Builder::new_current_thread()
+                        .enable_all().build().unwrap();
+                    let verifier = fv_layer4_verifier::Layer4Verifier::new();
+                    match rt.block_on(verifier.verify(&dir_19)) {
+                        Ok(report) => {
+                            for proof in &report.z3_proofs {
+                                if !proof.proved {
+                                    results.push(VulnerabilityFinding {
+                                        category: "Formal Verification".to_string(),
+                                        vuln_type: format!("State Machine Violation: {}", proof.property),
+                                        severity: 4,
+                                        severity_label: "High".to_string(),
+                                        id: "SOL-FV-04".to_string(),
+                                        cwe: Some("CWE-372".to_string()),
+                                        location: String::new(),
+                                        function_name: String::new(),
+                                        line_number: 0,
+                                        vulnerable_code: proof.property.clone(),
+                                        description: format!(
+                                            "Z3 state machine property '{}' not proved: {}. {}",
+                                            proof.property, proof.description,
+                                            proof.counterexample.as_deref().unwrap_or(""),
+                                        ),
+                                        attack_scenario: "Attacker invokes instructions in unexpected \
+                                            order to reach an unsafe state.".to_string(),
+                                        real_world_incident: None,
+                                        secure_fix: "Add state guard: require!(state == ExpectedState)".to_string(),
+                                        prevention: String::new(),
+                                        confidence: 72,
+                                    });
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("  {} FV Layer 4: {}", "⚠️".yellow(), e);
+                        }
+                    }
+                    results
+                });
+
+                // Phase 20: Symbolic Engine — Z3-backed authority bypass +
+                //           invariant violation proofs on parsed account schemas
+                let phase20 = s.spawn(move || {
+                    let mut results = Vec::new();
+                    let z3_cfg = z3::Config::new();
+                    let z3_ctx = z3::Context::new(&z3_cfg);
+                    let mut engine = symbolic_engine::SymbolicEngine::new(&z3_ctx);
+
+                    for (filename, source) in &raw_sources_20 {
+                        // Parse account schemas from source
+                        if let Ok(file) = syn::parse_file(source) {
+                            for item in &file.items {
+                                if let syn::Item::Struct(st) = item {
+                                    let is_account = st.attrs.iter().any(|a| a.path().is_ident("account"));
+                                    if is_account {
+                                        let mut fields = std::collections::HashMap::new();
+                                        for field in &st.fields {
+                                            if let Some(ident) = &field.ident {
+                                                let ty = quote::quote!(#field).to_string();
+                                                let mapped = if ty.contains("u64") || ty.contains("u128") { "u64" }
+                                                    else if ty.contains("bool") { "bool" }
+                                                    else if ty.contains("Pubkey") { "Pubkey" }
+                                                    else { "u64" };
+                                                fields.insert(ident.to_string(), mapped.to_string());
+                                            }
+                                        }
+                                        let schema = symbolic_engine::AccountSchema {
+                                            name: st.ident.to_string(),
+                                            fields,
+                                        };
+                                        engine.init_state_from_schema(&schema);
+
+                                        // Check invariant violations
+                                        let violations = engine.check_invariant_violations();
+                                        for v in violations {
+                                            results.push(VulnerabilityFinding {
+                                                category: "Symbolic Execution".to_string(),
+                                                vuln_type: format!("Exploitable: {:?}", v.vulnerability_type),
+                                                severity: 4,
+                                                severity_label: "High".to_string(),
+                                                id: "SOL-SYM-01".to_string(),
+                                                cwe: Some("CWE-682".to_string()),
+                                                location: filename.clone(),
+                                                function_name: st.ident.to_string(),
+                                                line_number: 0,
+                                                vulnerable_code: v.z3_model.clone(),
+                                                description: format!(
+                                                    "Symbolic engine found exploitable invariant \
+                                                     violation in account '{}': {:?}. {}",
+                                                    st.ident, v.vulnerability_type, v.explanation,
+                                                ),
+                                                attack_scenario: v.explanation.clone(),
+                                                real_world_incident: None,
+                                                secure_fix: v.mitigation.clone(),
+                                                prevention: String::new(),
+                                                confidence: 68,
+                                            });
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    results
+                });
+
+                // Collect all parallel results (batch 2 — formal verification)
+                findings.extend(phase16.join().unwrap_or_default());
+                findings.extend(phase17.join().unwrap_or_default());
+                findings.extend(phase18.join().unwrap_or_default());
+                findings.extend(phase19.join().unwrap_or_default());
+                findings.extend(phase20.join().unwrap_or_default());
+            });
+        }
 
 
         // ─── Finding Enrichment Pass ────────────────────────────────────────
