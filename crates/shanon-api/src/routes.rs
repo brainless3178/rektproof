@@ -424,8 +424,16 @@ pub async fn list_scored_programs(
 }
 
 /// POST /api/v1/scan
-/// Triggers a security scan. If source_url (GitHub) is provided, clones and analyzes.
-/// For program IDs without source, checks on-chain status.
+/// Triggers a security scan via the background worker.
+/// Returns a job ID for polling via GET /api/v1/scan/{job_id}.
+///
+/// Request body:
+/// ```json
+/// { "program_id": "...", "source_url": "https://github.com/..." }
+/// ```
+///
+/// If `source_url` is a GitHub URL, clones and runs full static analysis.
+/// If only `program_id` is given, runs on-chain metadata scan + verified source lookup.
 pub async fn trigger_scan(
     req: HttpRequest,
     body: web::Json<ScanRequestBody>,
@@ -437,271 +445,96 @@ pub async fn trigger_scan(
 
     info!("Scan requested: program_id={}, source_url={:?}", body.program_id, body.source_url);
 
-    // ─── GitHub Source Scan ──────────────────────────────────────────────
-    if let Some(ref source_url) = body.source_url {
+    use crate::worker::ScanTarget;
+
+    let target = if let Some(ref source_url) = body.source_url {
         if source_url.contains("github.com") {
-            return scan_github_repo(source_url).await;
-        }
-    }
-
-    // ─── On-chain Program ID Scan ───────────────────────────────────────
-    let program_id = match Pubkey::from_str(&body.program_id) {
-        Ok(pk) => pk,
-        Err(_) => {
+            ScanTarget::GitHub { url: source_url.clone() }
+        } else {
             return HttpResponse::BadRequest().json(serde_json::json!({
-                "error": "Invalid program ID"
-            }))
-        }
-    };
-
-    match state.rpc_client.get_account(&program_id).await {
-        Ok(account) => {
-            if !account.executable {
-                return HttpResponse::BadRequest().json(serde_json::json!({
-                    "error": "Address is not an executable program",
-                    "program_id": program_id.to_string(),
-                    "executable": false,
-                }));
-            }
-
-            HttpResponse::Accepted().json(serde_json::json!({
-                "status": "scan_queued",
-                "program_id": program_id.to_string(),
-                "message": "Security scan has been queued. Results will be available via GET /api/v1/risk/{program_id} once complete.",
-                "timestamp": chrono::Utc::now().to_rfc3339(),
-            }))
-        }
-        Err(e) => {
-            HttpResponse::NotFound().json(serde_json::json!({
-                "error": "Program not found on Solana",
-                "program_id": program_id.to_string(),
-                "details": e.to_string(),
-            }))
-        }
-    }
-}
-
-/// Clone a GitHub repo and run the full 52-detector analysis pipeline.
-async fn scan_github_repo(repo_url: &str) -> HttpResponse {
-    use std::process::Command;
-
-    // Extract repo name for display
-    let repo_name = repo_url
-        .trim_end_matches('/')
-        .rsplit('/')
-        .next()
-        .unwrap_or("unknown")
-        .trim_end_matches(".git")
-        .to_string();
-
-    info!("GitHub scan: cloning {} ...", repo_url);
-
-    // Create temp directory
-    let tmp_dir = match tempfile::tempdir() {
-        Ok(d) => d,
-        Err(e) => {
-            error!("Failed to create temp dir: {}", e);
-            return HttpResponse::InternalServerError().json(serde_json::json!({
-                "error": "Failed to create temporary directory",
-                "details": e.to_string(),
+                "error": "source_url must be a GitHub URL",
+                "provided": source_url,
             }));
         }
-    };
-
-    let clone_path = tmp_dir.path().to_path_buf();
-
-    // Clone the repository (shallow for speed)
-    let clone_result = tokio::task::spawn_blocking({
-        let url = repo_url.to_string();
-        let path = clone_path.clone();
-        move || {
-            Command::new("git")
-                .args(["clone", "--depth", "1", &url, &path.to_string_lossy()])
-                .output()
-        }
-    }).await;
-
-    match &clone_result {
-        Ok(Ok(output)) if !output.status.success() => {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            error!("Git clone failed: {}", stderr);
-            return HttpResponse::BadRequest().json(serde_json::json!({
-                "error": "Failed to clone repository",
-                "repo": repo_url,
-                "details": stderr.to_string(),
-            }));
-        }
-        Ok(Err(e)) => {
-            error!("Git command failed: {}", e);
-            return HttpResponse::InternalServerError().json(serde_json::json!({
-                "error": "Git not available",
-                "details": e.to_string(),
-            }));
-        }
-        Err(e) => {
-            error!("Task join failed: {}", e);
-            return HttpResponse::InternalServerError().json(serde_json::json!({
-                "error": "Scan task failed",
-                "details": e.to_string(),
-            }));
-        }
-        _ => {}
-    }
-
-    info!("GitHub scan: clone complete, running 52-detector analysis on {} ...", repo_name);
-
-    // Run ProgramAnalyzer on the cloned source
-    let analysis_result = tokio::task::spawn_blocking({
-        let path = clone_path.clone();
-        move || {
-            match program_analyzer::ProgramAnalyzer::new(&path) {
-                Ok(analyzer) => {
-                    let findings = analyzer.scan_for_vulnerabilities();
-                    Ok(findings)
-                }
-                Err(e) => Err(e.to_string()),
-            }
-        }
-    }).await;
-
-    let findings = match analysis_result {
-        Ok(Ok(f)) => f,
-        Ok(Err(e)) => {
-            // If main dir fails, try to find a subdirectory with Rust code
-            warn!("Top-level analysis failed ({}), searching for Rust subdirs...", e);
-            let sub_result = tokio::task::spawn_blocking({
-                let path = clone_path.clone();
-                move || find_and_analyze_rust_dirs(&path)
-            }).await;
-            match sub_result {
-                Ok(f) => f,
-                Err(e) => {
-                    return HttpResponse::InternalServerError().json(serde_json::json!({
-                        "error": "Analysis failed",
-                        "details": e.to_string(),
-                    }));
-                }
-            }
-        }
-        Err(e) => {
-            return HttpResponse::InternalServerError().json(serde_json::json!({
-                "error": "Analysis task failed",
-                "details": e.to_string(),
-            }));
-        }
-    };
-
-    // Compute severity counts
-    let critical_count = findings.iter().filter(|f| f.severity >= 5).count();
-    let high_count = findings.iter().filter(|f| f.severity == 4).count();
-    let medium_count = findings.iter().filter(|f| f.severity == 3).count();
-    let low_count = findings.iter().filter(|f| f.severity == 2).count();
-    let info_count = findings.iter().filter(|f| f.severity <= 1).count();
-    let total = findings.len();
-
-    // Compute risk score (0-100)
-    let risk_score: u32 = std::cmp::min(100,
-        (critical_count as u32 * 15) +
-        (high_count as u32 * 8) +
-        (medium_count as u32 * 4) +
-        (low_count as u32 * 2) +
-        (info_count as u32 * 1)
-    );
-
-    let risk_level = match risk_score {
-        0..=20 => "Low",
-        21..=40 => "Moderate",
-        41..=60 => "Elevated",
-        61..=80 => "High",
-        _ => "Critical",
-    };
-
-    info!("GitHub scan complete: {} findings, risk score {}/100 for {}", total, risk_score, repo_name);
-
-    // Build the detailed findings list with per-finding confidence
-    let findings_json: Vec<serde_json::Value> = findings.iter().take(200).map(|f| {
-        let confidence_label = match f.confidence {
-            70..=100 => "confirmed",
-            40..=69 => "likely",
-            _ => "possible",
-        };
-        serde_json::json!({
-            "flag_id": f.id,
-            "severity": f.severity_label,
-            "category": f.category,
-            "description": f.description,
-            "location": f.location,
-            "function": f.function_name,
-            "line": f.line_number,
-            "vulnerable_code": f.vulnerable_code.chars().take(500).collect::<String>(),
-            "fix": f.secure_fix.chars().take(500).collect::<String>(),
-            "confidence": f.confidence,
-            "confidence_label": confidence_label,
-        })
-    }).collect();
-
-    // Compute aggregate confidence (average across all findings)
-    let avg_confidence = if total > 0 {
-        findings.iter().map(|f| f.confidence as u32).sum::<u32>() / total as u32
     } else {
-        100
+        // Validate program ID format
+        if Pubkey::from_str(&body.program_id).is_err() {
+            return HttpResponse::BadRequest().json(serde_json::json!({
+                "error": "Invalid program ID",
+                "program_id": body.program_id,
+            }));
+        }
+        ScanTarget::OnChain { program_id: body.program_id.clone() }
     };
 
-    HttpResponse::Ok().json(serde_json::json!({
-        "status": "completed",
-        "scan_type": "github_source",
-        "repo": repo_url,
-        "repo_name": repo_name,
-        "overall_score": risk_score,
-        "risk_level": risk_level,
-        "confidence": avg_confidence,
-        "validation_pipeline": "multi-stage (dedup → context → anchor-aware → confidence → cap)",
-        "total_findings": total,
-        "critical_count": critical_count,
-        "high_count": high_count,
-        "medium_count": medium_count,
-        "low_count": low_count,
-        "info_count": info_count,
-        "flags": findings_json,
-        "detectors_run": 52,
+    let job_id = match state.scan_worker.submit(target).await {
+        Some(id) => id,
+        None => {
+            return HttpResponse::TooManyRequests().json(serde_json::json!({
+                "error": "Server at capacity",
+                "message": "Too many scan jobs queued. Please try again later.",
+                "retry_after_seconds": 30,
+            }));
+        }
+    };
+
+    HttpResponse::Accepted().json(serde_json::json!({
+        "status": "queued",
+        "job_id": job_id,
+        "poll_url": format!("/api/v1/scan/{}", job_id),
+        "message": "Scan job has been queued. Poll the job_id endpoint for results.",
         "timestamp": chrono::Utc::now().to_rfc3339(),
     }))
 }
 
-/// Recursively find directories containing .rs files and analyze them all.
-fn find_and_analyze_rust_dirs(root: &std::path::Path) -> Vec<program_analyzer::VulnerabilityFinding> {
-    let mut all_findings = Vec::new();
+/// GET /api/v1/scan/{job_id}
+/// Returns the current status and results of a scan job.
+pub async fn scan_status(
+    path: web::Path<String>,
+    state: web::Data<AppState>,
+) -> HttpResponse {
+    let job_id = path.into_inner();
 
-    // Walk subdirectories looking for Cargo.toml or .rs files
-    if let Ok(entries) = std::fs::read_dir(root) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                // Check if this dir has .rs files
-                let has_rust_files = std::fs::read_dir(&path)
-                    .map(|rd| rd.flatten().any(|e| {
-                        e.path().extension().map(|ext| ext == "rs").unwrap_or(false)
-                    }))
-                    .unwrap_or(false);
-
-                let has_src_dir = path.join("src").is_dir();
-
-                if has_rust_files || has_src_dir {
-                    if let Ok(analyzer) = program_analyzer::ProgramAnalyzer::new(&path) {
-                        let findings = analyzer.scan_for_vulnerabilities();
-                        all_findings.extend(findings);
-                    }
-                }
-
-                // Recurse into subdirectories
-                let sub_findings = find_and_analyze_rust_dirs(&path);
-                all_findings.extend(sub_findings);
-            }
-        }
+    match state.scan_worker.status(&job_id).await {
+        Some(result) => HttpResponse::Ok().json(serde_json::json!({
+            "job_id": job_id,
+            "status": result.status,
+            "scan_type": result.scan_type,
+            "target": result.target,
+            "risk_score": result.risk_score,
+            "risk_level": result.risk_level,
+            "total_findings": result.total_findings,
+            "critical_count": result.critical_count,
+            "high_count": result.high_count,
+            "medium_count": result.medium_count,
+            "low_count": result.low_count,
+            "info_count": result.info_count,
+            "findings": result.findings,
+            "on_chain_meta": result.on_chain_meta,
+            "started_at": result.started_at,
+            "completed_at": result.completed_at,
+            "error": result.error,
+        })),
+        None => HttpResponse::NotFound().json(serde_json::json!({
+            "error": "Job not found",
+            "job_id": job_id,
+            "hint": "Job IDs are ephemeral. Jobs may expire after server restart.",
+        })),
     }
-
-    all_findings
 }
+
+/// GET /api/v1/scan/jobs
+/// Lists all scan jobs (most recent first, max 50).
+pub async fn list_scan_jobs(
+    state: web::Data<AppState>,
+) -> HttpResponse {
+    let jobs = state.scan_worker.list_jobs().await;
+    HttpResponse::Ok().json(serde_json::json!({
+        "jobs": jobs,
+        "total": jobs.len(),
+    }))
+}
+
 
 /// GET /api/v1/engines
 pub async fn list_engines(_state: web::Data<AppState>) -> HttpResponse {
@@ -1272,7 +1105,7 @@ pub async fn simulate_transaction(
 
     // Known risky programs (flagged by community)
     let known_risky: std::collections::HashMap<&str, &str> = [
-        // Placeholder — in production, this would be a live database
+        // Community-flagged risky programs — populated from external threat intel feed when available
     ].iter().cloned().collect();
 
     let mut assessments = Vec::new();

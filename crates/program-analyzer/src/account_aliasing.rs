@@ -234,9 +234,57 @@ fn analyze_accounts_struct(
     }
 
     // ── Check 2: Raw AccountInfo Usage ────────────────────────────────
+    // Only flag raw AccountInfo fields that have NO constraints and NO
+    // safety comments.  Fields with has_one, address, owner, seeds, or
+    // CHECK comments are intentionally raw — the developer validated
+    // manually or via data constraints.
 
     for account in &accounts {
         if account.account_type == AccountType::RawAccountInfo {
+            // Skip if the field has meaningful constraints
+            let has_meaningful_constraint = account.constraints.iter().any(|c| {
+                matches!(
+                    c.kind,
+                    ConstraintKind::HasOne(_)
+                        | ConstraintKind::Seeds
+                        | ConstraintKind::Address
+                        | ConstraintKind::Owner
+                        | ConstraintKind::CustomConstraint
+                        | ConstraintKind::Close
+                )
+            });
+            if has_meaningful_constraint {
+                continue;
+            }
+
+            // Skip if preceded by a `/// CHECK:` safety comment
+            let has_check_comment = if account.line > 0 && account.line <= lines.len() {
+                (1..=3).any(|offset| {
+                    let check_line = account.line.saturating_sub(offset);
+                    check_line > 0 && check_line <= lines.len()
+                        && lines[check_line - 1].contains("CHECK")
+                })
+            } else {
+                false
+            };
+            if has_check_comment {
+                continue;
+            }
+
+            // Skip if the field is the target of another account's has_one
+            // (e.g., `has_one = authority` means authority is a data field,
+            // not a permissioning account — the caller's ownership is proven
+            // by the data match, not by signing).
+            let is_has_one_target = accounts.iter().any(|other| {
+                other.name != account.name
+                    && other.constraints.iter().any(|c| {
+                        matches!(&c.kind, ConstraintKind::HasOne(target) if target == &account.name)
+                    })
+            });
+            if is_has_one_target {
+                continue;
+            }
+
             findings.push(VulnerabilityFinding {
                 category: "Account Safety".into(),
                 vuln_type: "Raw AccountInfo Without Type Safety".into(),
@@ -379,6 +427,24 @@ fn analyze_accounts_struct(
     }
 
     // ── Check 5: Missing Signer on Authority Accounts ────────────────
+    //
+    // An authority-named field ("authority", "admin", "owner") is only a
+    // REAL vulnerability if it's the account that GRANTS permission.
+    //
+    // FALSE POSITIVE conditions (skip the finding):
+    //  a) The struct already has a SEPARATE Signer<'info> field — the
+    //     authority field is a data-matching target, not the permissioner.
+    //  b) Another account in the struct has `has_one = <this_field>` —
+    //     meaning it's validated via data constraint, not signing.
+    //  c) The field has an `address = ...` constraint (checked by key).
+    //  d) The field has a `close = ...` usage (receives lamports, not
+    //     a permissioning role).
+    //  e) The field has a CHECK comment above it.
+
+    // Pre-compute: does this struct have any other Signer account?
+    let struct_has_signer = accounts.iter().any(|a| {
+        a.account_type == AccountType::Signer || a.is_signer
+    });
 
     for account in &accounts {
         let name_lower = account.name.to_lowercase();
@@ -387,6 +453,63 @@ fn analyze_accounts_struct(
             && !account.is_signer
             && account.account_type != AccountType::Signer
         {
+            // (a) If the struct has a separate Signer AND this field is
+            //     referenced by `has_one` from another account, it's a
+            //     data field, not a permissioning account.
+            let is_has_one_target = accounts.iter().any(|other| {
+                other.name != account.name
+                    && other.constraints.iter().any(|c| {
+                        matches!(&c.kind, ConstraintKind::HasOne(target) if target == &account.name)
+                    })
+            });
+            if struct_has_signer && is_has_one_target {
+                continue;
+            }
+
+            // (b) Even without companion Signer, if the field itself is
+            //     ONLY used as `close = authority` target (lamport
+            //     refund destination), it's not permissioning.
+            let is_close_target = accounts.iter().any(|other| {
+                other.constraints.iter().any(|c| {
+                    matches!(&c.kind, ConstraintKind::Close)
+                        && c.raw.contains(&account.name)
+                })
+            });
+            // If it's ONLY a close target and has_one target, skip.
+            if is_has_one_target && is_close_target {
+                continue;
+            }
+
+            // (c) Field has address constraint — keyed, not a signer issue
+            let has_address = account.constraints.iter().any(|c| {
+                matches!(c.kind, ConstraintKind::Address)
+            });
+            if has_address {
+                continue;
+            }
+
+            // (d) Field has a CHECK comment
+            let has_check_comment = if account.line > 0 && account.line <= lines.len() {
+                (1..=3).any(|offset| {
+                    let check_line = account.line.saturating_sub(offset);
+                    check_line > 0 && check_line <= lines.len()
+                        && lines[check_line - 1].contains("CHECK")
+                })
+            } else {
+                false
+            };
+            if has_check_comment && (struct_has_signer || is_has_one_target) {
+                continue;
+            }
+
+            // (e) Field has custom constraint validating it
+            let has_custom_constraint = account.constraints.iter().any(|c| {
+                matches!(c.kind, ConstraintKind::CustomConstraint)
+            });
+            if has_custom_constraint {
+                continue;
+            }
+
             findings.push(VulnerabilityFinding {
                 category: "Authorization".into(),
                 vuln_type: "Authority Account Without Signer Check".into(),
@@ -403,8 +526,9 @@ fn analyze_accounts_struct(
                 ),
                 description: format!(
                     "Account `{}` in `{}` has an authority-like name but is not \
-                     marked as a signer. An attacker can pass any account as the \
-                     authority without proving ownership.",
+                     marked as a signer and no companion signer validates it. \
+                     An attacker can pass any account as the authority without \
+                     proving ownership.",
                     account.name, struct_name,
                 ),
                 attack_scenario: "Attacker reads the authority pubkey from the program's \

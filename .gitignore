@@ -28,6 +28,10 @@ audit_reports/v2_report.json
 
 # Third-party test targets (cloned repos, ~718MB)
 test_targets/
+test-live-programs/
+
+# Audit result artifacts (generated output)
+live-audit-results/
 
 # Local deploy folders
 .netlify

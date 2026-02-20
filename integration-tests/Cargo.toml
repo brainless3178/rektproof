@@ -8,7 +8,12 @@ publish = false
 name = "analyzer_regression"
 path = "tests/analyzer_regression.rs"
 
+[[test]]
+name = "full_pipeline"
+path = "tests/full_pipeline.rs"
+
 [dependencies]
 program-analyzer = { path = "../crates/program-analyzer" }
 cpi-analyzer = { path = "../crates/cpi-analyzer" }
+consensus-engine = { path = "../crates/experimental/consensus-engine" }
 serde_json = "1.0"

@@ -21,6 +21,7 @@ pub mod scoreboard;
 pub mod badge;
 pub mod rate_limiter;
 pub mod openapi;
+pub mod worker;
 
 // ─── App State ──────────────────────────────────────────────────────────────
 
@@ -32,6 +33,8 @@ pub struct AppState {
     pub oracle_program_id: Pubkey,
     /// Security scoreboard store
     pub scoreboard: Option<Arc<scoreboard::ScoreboardStore>>,
+    /// Background scan worker
+    pub scan_worker: worker::ScanWorker,
     /// API key for authenticated endpoints (from environment).
     pub api_key: Option<String>,
 }
@@ -131,10 +134,14 @@ async fn main() -> std::io::Result<()> {
         }
     };
 
+    let scan_worker = worker::ScanWorker::new(rpc_client.clone());
+    info!("Background scan worker initialized");
+
     let state = AppState {
         rpc_client,
         oracle_program_id,
         scoreboard: Some(Arc::new(scoreboard::ScoreboardStore::new())),
+        scan_worker,
         api_key: config.api_key,
     };
 
@@ -184,6 +191,8 @@ async fn main() -> std::io::Result<()> {
             .route("/api/v1/analyst/{wallet}", web::get().to(routes::get_analyst))
             .route("/api/v1/analysts", web::get().to(routes::list_analysts))
             .route("/api/v1/scan", web::post().to(routes::trigger_scan))
+            .route("/api/v1/scan/jobs", web::get().to(routes::list_scan_jobs))
+            .route("/api/v1/scan/{job_id}", web::get().to(routes::scan_status))
             .route("/api/v1/engines", web::get().to(routes::list_engines))
             .route("/api/v1/detectors", web::get().to(routes::list_detectors))
             .route("/api/v1/exploits", web::get().to(routes::list_exploits))

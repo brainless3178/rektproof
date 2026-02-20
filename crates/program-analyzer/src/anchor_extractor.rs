@@ -20,10 +20,20 @@ impl AnchorExtractor {
         })
     }
 
-    pub fn is_program_module(_f: &ItemFn) -> bool {
-        // Not trivial on ItemFn, but placeholder logic
-        // Use _f to suppress unused variable warning
-        false
+    pub fn is_program_module(f: &ItemFn) -> bool {
+        // Check for #[program] attribute on the function
+        if Self::has_macro_attribute(&f.attrs, "program") {
+            return true;
+        }
+
+        // Detect Anchor instruction handlers by signature pattern:
+        // pub fn handler(ctx: Context<...>, ...) -> Result<()>
+        let sig = f.sig.to_token_stream().to_string();
+        let has_context_param = sig.contains("Context <") || sig.contains("Context<");
+        let has_result_return = sig.contains("Result <") || sig.contains("Result<");
+        let is_pub = matches!(f.vis, syn::Visibility::Public(_));
+
+        is_pub && has_context_param && has_result_return
     }
 
     fn has_macro_attribute(attrs: &[Attribute], name: &str) -> bool {

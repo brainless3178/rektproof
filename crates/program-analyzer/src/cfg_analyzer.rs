@@ -542,7 +542,27 @@ fn check_guard_dominance(
                 } else if auth_blocks.is_empty()
                     && (stmt.kind == StmtKind::TokenTransfer || stmt.kind == StmtKind::CpiCall)
                 {
-                    // No auth checks at all
+                    // No auth checks at all — but suppress for utility/helper functions
+                    // that delegate authorization to their callers. We can only see one
+                    // function at a time, so utility functions with CPI but no local
+                    // auth check are interprocedural FPs.
+                    let fn_name = &stmt.function_name;
+                    let is_entry_point = fn_name.starts_with("process_")
+                        || fn_name.starts_with("handle_")
+                        || fn_name == "process_instruction"
+                        || fn_name.starts_with("execute_");
+                    if !is_entry_point {
+                        continue;
+                    }
+                    // Init/initialize functions create new state — they don't need
+                    // prior authorization since there's nothing to protect yet.
+                    let is_init_function = fn_name.contains("init")
+                        || fn_name.contains("initialize")
+                        || fn_name.contains("create");
+                    if is_init_function {
+                        continue;
+                    }
+
                     let op_type = if stmt.kind == StmtKind::TokenTransfer {
                         "Token Transfer"
                     } else {
@@ -748,13 +768,33 @@ fn check_error_paths(
 
 /// Classify a statement for security analysis
 fn classify_statement(code: &str) -> StmtKind {
-    // Authorization checks
+    let code_lower = code.to_lowercase();
+
+    // Authorization checks — Anchor type-level
     if code.contains("is_signer") || code.contains("#[account(signer")
         || code.contains("has_one") || (code.contains("require!") && code.contains("authority"))
         || (code.contains("require!") && code.contains("signer"))
         || (code.contains("require!") && code.contains("admin"))
         || code.contains("constraint") && code.contains("owner")
     {
+        return StmtKind::AuthorizationCheck;
+    }
+
+    // Authorization checks — Interprocedural (native Solana programs)
+    // assert_* calls: assert_can_execute_transaction, assert_signer, etc.
+    if code_lower.contains("assert_") && !code_lower.contains("assert_eq!")
+        && !code_lower.contains("assert_ne!")
+        && (code.contains("(") || code.contains("?"))
+    {
+        return StmtKind::AuthorizationCheck;
+    }
+    // get_*_data(program_id, ...) — ownership-validating deserializers
+    if code_lower.contains("get_") && code_lower.contains("_data") && code.contains("program_id")
+    {
+        return StmtKind::AuthorizationCheck;
+    }
+    // PDA validation — find_program_address / create_program_address
+    if code.contains("find_program_address") || code.contains("create_program_address") {
         return StmtKind::AuthorizationCheck;
     }
 

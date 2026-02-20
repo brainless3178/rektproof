@@ -459,8 +459,19 @@ pub fn validate_findings_with_threshold(
     results = deduplicate(results);
 
     // Stage 2: Code-level proof verification — eliminate findings where the
-    // code provably contains a mitigation the checker missed
+    // code provably contains a mitigation the checker missed.
+    // IMPORTANT: This must run BEFORE root-cause grouping so each finding
+    // is individually verified against its own code snippet.
     results = eliminate_proven_safe(&results, ctx);
+
+    // Stage 2b: Root-cause grouping — collapse the same vuln ID across
+    // different files into a single finding annotated with location count.
+    // Example: SOL-055 in initialize.rs, withdraw.rs, collect_fee.rs
+    //   => 1 finding: "SOL-055 ... (found in 3 locations)"
+    // This prevents finding count inflation, but runs AFTER proof
+    // verification so true positives aren't masked by a false positive
+    // chosen as the primary representative.
+    results = group_by_root_cause(results);
 
     // Stage 3: Assign confidence scores
     assign_confidence(&mut results, ctx);
@@ -484,6 +495,57 @@ fn deduplicate(findings: Vec<VulnerabilityFinding>) -> Vec<VulnerabilityFinding>
         .into_iter()
         .filter(|f| seen.insert((f.id.clone(), f.location.clone())))
         .collect()
+}
+
+/// Stage 1b: Root-cause grouping — collapse the same vuln ID across
+/// different files into one finding.  The first occurrence is kept, and
+/// its description is annotated with the list of additional locations.
+///
+/// This prevents finding count inflation.  Example:
+/// * SOL-055 in `initialize.rs`, `withdraw.rs`, `collect_fee.rs`
+/// * Before: 3 separate findings (inflates report)
+/// * After: 1 finding with note "(also in withdraw.rs, collect_fee.rs)"
+fn group_by_root_cause(findings: Vec<VulnerabilityFinding>) -> Vec<VulnerabilityFinding> {
+    let mut groups: HashMap<String, Vec<VulnerabilityFinding>> = HashMap::new();
+    let mut order: Vec<String> = Vec::new();
+
+    for f in findings {
+        let key = f.id.clone();
+        if !groups.contains_key(&key) {
+            order.push(key.clone());
+        }
+        groups.entry(key).or_default().push(f);
+    }
+
+    let mut result = Vec::new();
+    for key in order {
+        let group = groups.remove(&key).unwrap();
+        if group.len() == 1 {
+            result.push(group.into_iter().next().unwrap());
+        } else {
+            let mut primary = group[0].clone();
+            let other_locations: Vec<String> = group[1..]
+                .iter()
+                .map(|f| {
+                    let loc = f.location.rsplit('/').next().unwrap_or(&f.location);
+                    if f.function_name.is_empty() {
+                        loc.to_string()
+                    } else {
+                        format!("{}:{}", loc, f.function_name)
+                    }
+                })
+                .collect();
+            primary.description = format!(
+                "{} [found in {} locations; also in: {}]",
+                primary.description,
+                group.len(),
+                other_locations.join(", "),
+            );
+            result.push(primary);
+        }
+    }
+
+    result
 }
 
 /// Stage 2: Code-level proof verification.
@@ -512,6 +574,11 @@ fn is_proven_safe(finding: &VulnerabilityFinding, ctx: &ProjectContext) -> bool 
     let code = &finding.vulnerable_code;
     let fn_name = &finding.function_name;
     let fn_lower = fn_name.to_lowercase();
+
+    // `quote!` normalizes code by inserting spaces around `.`, `(`, `)`,
+    // `::`, `<`, `>`, `#[` etc.  Build a space-stripped version so that
+    // pattern checks work regardless of which representation we get.
+    let norm: String = code.chars().filter(|c| *c != ' ').collect();
 
     // ── Universal elimination: helper/utility functions ──────────────
     // Internal helpers that take raw AccountInfo params are NOT instruction
@@ -618,6 +685,13 @@ fn is_proven_safe(finding: &VulnerabilityFinding, ctx: &ProjectContext) -> bool 
             {
                 return true;
             }
+            // Init/initialize functions legitimately create accounts — the caller
+            // controls the keypair, so frontrunning risk is minimal
+            if fn_name.contains("init") || fn_name.contains("initialize")
+                || fn_name.contains("create")
+            {
+                return true;
+            }
             false
         }
 
@@ -645,6 +719,18 @@ fn is_proven_safe(finding: &VulnerabilityFinding, ctx: &ProjectContext) -> bool 
             }
             // AccountLoader::load_init() checks discriminator (zero = uninit)
             if code.contains("load_init") {
+                return true;
+            }
+            // Functions that use system_instruction::create_account are safe:
+            // create_account fails if the account already has lamports, so
+            // reinit is impossible.
+            if code.contains("system_instruction::create_account")
+                || code.contains("create_account(")
+            {
+                return true;
+            }
+            // Functions named init/initialize are definitionally initializers
+            if fn_name.contains("init") || fn_name.contains("initialize") {
                 return true;
             }
             // Cross-file check: does the file for this function's Accounts
@@ -897,14 +983,40 @@ fn is_proven_safe(finding: &VulnerabilityFinding, ctx: &ProjectContext) -> bool 
             false
         }
 
-        // ── SOL-055: Token2022 Transfer Hook Reentrancy ─────────
-        // FALSE POSITIVE IF: code has reentrancy guard or checks-effects-interactions
+        // ── SOL-055: Token2022 Transfer Hook Reentrancy ───────────
+        // FALSE POSITIVE IF:
+        // a) Code has reentrancy guard
+        // b) Code explicitly checks/handles TransferHook extension
+        // c) ***CRITICAL***: Code has an extension whitelist that does NOT
+        //    include TransferHook — meaning tokens with hooks are rejected
+        //    at pool/vault initialization.  This was the root cause of the
+        //    Raydium false positive where `is_supported_mint()` only allows
+        //    TransferFeeConfig, MetadataPointer, TokenMetadata, etc.
         "SOL-055" => {
             if ctx.has_reentrancy_guard {
                 return true;
             }
+            // Direct handler code mentions hook handling
             if code.contains("get_transfer_hook") || code.contains("TransferHook") {
                 return true;
+            }
+            // Project-wide extension whitelist check:
+            // If the codebase has an allowlist of extensions (common in
+            // DEXes and AMMs) and TransferHook is NOT in it, then transfer
+            // hook reentrancy is impossible — those tokens can't enter.
+            for (_file, src) in &ctx.source_index {
+                // Pattern: iterates over extensions and rejects unknown ones
+                // (e.g., `!= ExtensionType::TransferFeeConfig && != ...`)
+                if (src.contains("ExtensionType") || src.contains("get_extension_types"))
+                    && (src.contains("is_supported_mint") || src.contains("supported_extensions")
+                        || src.contains("allowed_extensions") || src.contains("return Ok(false)"))
+                {
+                    // If the whitelist does NOT mention TransferHook, hooks
+                    // are blocked and reentrancy is impossible
+                    if !src.contains("TransferHook") {
+                        return true;
+                    }
+                }
             }
             false
         }
@@ -996,10 +1108,69 @@ fn is_proven_safe(finding: &VulnerabilityFinding, ctx: &ProjectContext) -> bool 
         }
 
         // ── SOL-063: Unvalidated remaining_accounts ─────────────
-        // FALSE POSITIVE IF: remaining_accounts are validated per-item
+        // FALSE POSITIVE IF:
+        // a) The code iterates remaining_accounts and validates keys/owners
+        // b) ***CRITICAL***: The code REJECTS remaining_accounts entirely
+        //    (e.g., Marinade's `if !ctx.remaining_accounts.is_empty() { return err!() }`)
+        //    This was flagging the DEFENSE as the attack.
+        // c) The project has a structured remaining_accounts parsing framework
+        //    (e.g., Orca's `parse_remaining_accounts` with typed AccountsType enum)
+        // d) The code uses a safe wrapper like `load_maps()` that validates
         "SOL-063" => {
-            if code.contains("remaining_accounts.iter()")
-                && (code.contains(".key()") || code.contains("owner"))
+            // (uses function-level `norm` for quote!-normalized matching)
+
+            // (a) Per-item validation in the flagged code itself.
+            //     CRITICAL: `code` often includes BOTH the Accounts struct
+            //     AND the handler (via `/* ACCOUNTS_STRUCT: ... */`).
+            //     We must check that `.key()` is used in the HANDLER portion
+            //     in conjunction with remaining_accounts iteration, not just
+            //     present in the struct's constraints.
+            let handler_code = if let Some(pos) = code.find("/* HANDLER:") {
+                &code[pos..]
+            } else {
+                code.as_str()
+            };
+            let handler_norm: String = handler_code.chars().filter(|c| *c != ' ').collect();
+
+            if (handler_code.contains("remaining_accounts.iter()")
+                || handler_norm.contains("remaining_accounts.iter()"))
+                && (handler_code.contains(".key()") || handler_norm.contains(".key()")
+                    || handler_code.contains("owner ==") || handler_norm.contains("owner=="))
+            {
+                return true;
+            }
+            // (b) Code rejects remaining_accounts entirely — this is a
+            //     defense, not a vulnerability.  Marinade pattern:
+            //     `if !ctx.remaining_accounts.is_empty() { return err!() }`
+            if (code.contains("remaining_accounts.is_empty()")
+                || norm.contains("remaining_accounts.is_empty()"))
+                && (code.contains("return err") || code.contains("return Err")
+                    || norm.contains("returnerr") || norm.contains("err!(")
+                    || code.contains("err!(") || code.contains("Error"))
+            {
+                return true;
+            }
+            // (c) Project has a structured remaining_accounts parsing
+            //     framework with typed enums and validation
+            for (_file, src) in &ctx.source_index {
+                // Pattern like Orca's: parse_remaining_accounts function
+                // with AccountsType enum and RemainingAccountsInfo struct
+                if (src.contains("parse_remaining_accounts")
+                    || src.contains("ParsedRemainingAccounts")
+                    || src.contains("RemainingAccountsInfo"))
+                    && (src.contains("AccountsType") || src.contains("RemainingAccountsSlice")
+                        || src.contains("remaining_accounts_info"))
+                {
+                    return true;
+                }
+                // Pattern like Drift's: load_maps() with AccountMaps validation
+                if src.contains("fn load_maps") && src.contains("AccountMaps") {
+                    return true;
+                }
+            }
+            // (d) The function itself calls a safe wrapper
+            if code.contains("load_maps(") || norm.contains("load_maps(")
+                || code.contains("parse_remaining_accounts(") || norm.contains("parse_remaining_accounts(")
             {
                 return true;
             }
@@ -1122,7 +1293,11 @@ fn is_proven_safe(finding: &VulnerabilityFinding, ctx: &ProjectContext) -> bool 
 /// Stage 3: Assign confidence scores based on remaining project context.
 /// These findings survived proof verification, so they have a higher
 /// base confidence — but project maturity still modulates the score.
-/// Uses per-detector calibrated base confidence from VulnerabilityPattern.
+///
+/// v0.2.0: Uses per-finding verifiability heuristics for wider score
+/// distribution.  Findings with inline code evidence (the vulnerable
+/// pattern is visible in the snippet) get boosted.  Findings requiring
+/// cross-file reasoning get penalized.
 fn assign_confidence(findings: &mut [VulnerabilityFinding], ctx: &ProjectContext) {
     let maturity = ctx.maturity_score();
 
@@ -1141,6 +1316,62 @@ fn assign_confidence(findings: &mut [VulnerabilityFinding], ctx: &ProjectContext
             .unwrap_or(80) as f64;
         let mut confidence: f64 = base;
 
+        // ── Inline evidence boost ────────────────────────────────────
+        // If the vulnerable code snippet ITSELF contains the smoking gun,
+        // the finding is more verifiable and gets a confidence boost.
+        let code = &finding.vulnerable_code;
+        let has_inline_evidence = match finding.id.as_str() {
+            // remaining_accounts: inline if the snippet shows .unwrap()
+            "SOL-063" => code.contains(".unwrap()") || code.contains("remaining_accounts["),
+            // CU exhaustion: inline if we can see a loop with invoke
+            "SOL-061" => code.contains("for ") && code.contains("invoke"),
+            // Governance bypass: inline if we see authority change
+            "SOL-064" => code.contains("authority") && code.contains("set_"),
+            // Arithmetic: inline if snippet has the operation
+            "SOL-002" | "SOL-045" | "SOL-094" => code.contains("+ ") || code.contains("* ") || code.contains("as u64"),
+            _ => false,
+        };
+        if has_inline_evidence {
+            confidence += 15.0;
+        }
+
+        // ── Cross-file penalty ───────────────────────────────────────
+        // Findings that depend on cross-file context (e.g., "no signer
+        // in another file") are inherently less certain.
+        let is_cross_file_dependent = matches!(
+            finding.id.as_str(),
+            "SOL-ALIAS-02" | "SOL-ALIAS-05" | "SOL-TAINT-02" | "SOL-059"
+        );
+        if is_cross_file_dependent {
+            confidence -= 12.0;
+        }
+
+        // ── Detection type reliability ───────────────────────────────
+        // AST-verified findings (from syn parsing) are more reliable
+        // than pattern-matching findings (regex on source text).
+        let category = &finding.category;
+        if category.contains("Account Safety") || category.contains("Authorization") {
+            // AST-parsed account struct analysis — reliable
+            confidence += 5.0;
+        } else if category.contains("Heuristic") {
+            // Pattern-matching — less reliable
+            confidence -= 10.0;
+        }
+
+        // ── DeFi-specific calibration ────────────────────────────────
+        // Reward calculation and fee mismatch findings get severity-
+        // appropriate confidence.  These are historically high-impact
+        // but also high-noise in complex DeFi code.
+        if finding.id == "SOL-050" || finding.id == "SOL-056" {
+            // Lower base, but boost if the snippet shows the actual math
+            confidence -= 8.0;
+            if code.contains("emission") || code.contains("fee_rate")
+                || code.contains("reward") || code.contains("fee_amount")
+            {
+                confidence += 12.0;
+            }
+        }
+
         // Project-level mitigation (may not have been caught by proof stage)
         if ctx.mitigated_ids.contains(&finding.id) {
             confidence -= 30.0;
@@ -1150,8 +1381,6 @@ fn assign_confidence(findings: &mut [VulnerabilityFinding], ctx: &ProjectContext
         confidence -= maturity * 20.0;
 
         // Anchor-typed ratio penalty for auth-related findings
-        // NOTE: SOL-001 (missing signer) is excluded — it's too critical
-        // to discount based on ratio heuristics alone.
         if ctx.anchor_typed_ratio > 0.7 {
             match finding.id.as_str() {
                 "SOL-003" | "SOL-004" | "SOL-005"
@@ -1163,7 +1392,6 @@ fn assign_confidence(findings: &mut [VulnerabilityFinding], ctx: &ProjectContext
         }
 
         // Non-Solana code penalty — non-program code gets low confidence
-        let code = &finding.vulnerable_code;
         if !code.contains("Context <") && !code.contains("Context<")
             && !code.contains("AccountInfo <") && !code.contains("AccountInfo<")
             && !code.contains("# [account") && !code.contains("#[account")
@@ -1177,11 +1405,12 @@ fn assign_confidence(findings: &mut [VulnerabilityFinding], ctx: &ProjectContext
         match finding.severity {
             1 => confidence -= 15.0,
             2 => confidence -= 10.0,
+            5 => confidence += 5.0,  // Critical findings get a small boost
             _ => {}
         }
 
-        // Clamp
-        finding.confidence = confidence.clamp(0.0, 100.0) as u8;
+        // Clamp to wider range: 15-95
+        finding.confidence = confidence.clamp(15.0, 95.0) as u8;
     }
 }
 

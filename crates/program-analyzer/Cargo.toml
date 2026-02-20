@@ -22,6 +22,18 @@ toml = "0.8"
 rayon = "1.8"
 zeroize = { version = "1.3", features = ["zeroize_derive"] }
 once_cell = "1.19"
+sec3-analyzer = { path = "../experimental/sec3-analyzer" }
+anchor-security-analyzer = { path = "../experimental/anchor-security-analyzer" }
+dataflow-analyzer = { path = "../experimental/dataflow-analyzer" }
+taint-analyzer = { path = "../experimental/taint-analyzer" }
+geiger-analyzer = { path = "../experimental/geiger-analyzer" }
+arithmetic-security-expert = { path = "../experimental/arithmetic-security-expert" }
+invariant-miner = { path = "../experimental/invariant-miner" }
+l3x-analyzer = { path = "../experimental/l3x-analyzer" }
+concolic-executor = { path = "../experimental/concolic-executor" }
+security-fuzzer = { path = "../experimental/security-fuzzer" }
+account-security-expert = { path = "../experimental/account-security-expert" }
+defi-security-expert = { path = "../experimental/defi-security-expert" }
 
 [dev-dependencies]
 criterion = "0.5"

@@ -96,6 +96,8 @@ pub struct ProgramAnalyzer {
     /// Raw source text per file — needed by deep_ast_scanner for line-level precision
     raw_sources: Vec<(String, String)>,
     vulnerability_db: vulnerability_db::VulnerabilityDatabase,
+    /// Original program directory — needed by Sec3 detectors that re-scan from disk
+    program_dir: Option<std::path::PathBuf>,
 }
 
 impl ProgramAnalyzer {
@@ -135,6 +137,7 @@ impl ProgramAnalyzer {
             source_files,
             raw_sources,
             vulnerability_db: vulnerability_db::VulnerabilityDatabase::load(),
+            program_dir: Some(program_dir.to_path_buf()),
         })
     }
 
@@ -145,6 +148,7 @@ impl ProgramAnalyzer {
             source_files: vec![("source.rs".to_string(), file)],
             raw_sources: vec![("source.rs".to_string(), source.to_string())],
             vulnerability_db: vulnerability_db::VulnerabilityDatabase::load(),
+            program_dir: None,
         })
     }
 
@@ -229,16 +233,419 @@ impl ProgramAnalyzer {
             }
         }
 
-        // Deduplicate: same (id, line_number) or same (id, function_name)
-        let mut seen = std::collections::HashSet::new();
-        findings.retain(|f| {
-            let key = if f.line_number > 0 {
-                format!("{}:{}:{}", f.id, f.location, f.line_number)
-            } else {
-                format!("{}:{}:{}", f.id, f.location, f.function_name)
+        // Phase 7: Sec3 (Soteria) deep analysis — ONLY net-new detector
+        //          categories not already covered by Phases 1-6.
+        //          Overlap detectors (owner, signer, integer, CPI) are disabled
+        //          because the production equivalents have better calibration.
+        if let Some(ref dir) = self.program_dir {
+            let config = sec3_analyzer::Sec3Config {
+                // --- Net-new detectors (these are the value-add) ---
+                check_close_accounts: true,
+                check_duplicate_accounts: true,
+                check_remaining_accounts: true,
+                check_pda_security: true,
+                check_account_confusion: true,
+                // --- Disabled: already covered by production detectors ---
+                check_ownership: false,       // SOL-012 in vulnerability_db
+                check_signer_validation: false, // SOL-001 in vulnerability_db
+                check_integer_safety: false,  // SOL-006 + abstract_interp
+                check_cpi_safety: false,      // SOL-017 in deep_ast_scanner
+                max_files: 0,
+                max_file_size: 500_000,
             };
-            seen.insert(key)
+            let mut sec3 = sec3_analyzer::Sec3Analyzer::with_config(config);
+            match sec3.analyze_program(dir) {
+                Ok(report) => {
+                    let converted: Vec<VulnerabilityFinding> = report
+                        .findings
+                        .into_iter()
+                        .map(sec3_finding_to_vulnerability)
+                        .collect();
+                    findings.extend(converted);
+                }
+                Err(e) => {
+                    eprintln!("  {} Sec3 phase: {}", "⚠️".yellow(), e);
+                }
+            }
+        }
+
+        // Phase 8: Anchor Framework security analysis — constraint validation,
+        //          Token-2022 hook analysis, bump/space checks.
+        //          Auto-skips non-Anchor programs (checks Cargo.toml for anchor-lang).
+        if let Some(ref dir) = self.program_dir {
+            let mut anchor = anchor_security_analyzer::AnchorSecurityAnalyzer::new();
+            match anchor.analyze_program(dir) {
+                Ok(report) if report.is_anchor_program => {
+                    let converted: Vec<VulnerabilityFinding> = report
+                        .findings
+                        .into_iter()
+                        .map(anchor_finding_to_vulnerability)
+                        .collect();
+                    findings.extend(converted);
+                }
+                Ok(_) => {
+                    // Not an Anchor program — no findings to add
+                }
+                Err(e) => {
+                    eprintln!("  {} Anchor phase: {}", "⚠️".yellow(), e);
+                }
+            }
+        }
+
+        // Phase 9: Dataflow analysis — reaching definitions + live variables.
+        //          Catches uninitialized uses and dead definitions.
+        for (filename, source) in &self.raw_sources {
+            let mut df = dataflow_analyzer::DataflowAnalyzer::new();
+            if df.analyze_source(source, filename).is_ok() {
+                // Uninitialized variable uses
+                for uninit in df.find_uninitialized_uses() {
+                    findings.push(VulnerabilityFinding {
+                        category: "Data Flow".to_string(),
+                        vuln_type: "Potentially Uninitialized Variable Use".to_string(),
+                        severity: 3,
+                        severity_label: "Medium".to_string(),
+                        id: "SOL-090".to_string(),
+                        cwe: Some("CWE-457".to_string()),
+                        location: filename.clone(),
+                        function_name: uninit.function.clone(),
+                        line_number: 0,
+                        vulnerable_code: format!("{} used at {}", uninit.var_name, uninit.location),
+                        description: format!(
+                            "Variable '{}' may be used before being defined (no reaching definition found at use site).",
+                            uninit.var_name
+                        ),
+                        attack_scenario: String::new(),
+                        real_world_incident: None,
+                        secure_fix: "Ensure the variable is initialized on all code paths before use.".to_string(),
+                        prevention: String::new(),
+                        confidence: 40,
+                    });
+                }
+
+                // Dead definitions (security-relevant: could indicate stale state)
+                for dead in df.find_dead_definitions() {
+                    if matches!(dead.kind, dataflow_analyzer::DefinitionKind::Assignment | dataflow_analyzer::DefinitionKind::FieldAssignment) {
+                        findings.push(VulnerabilityFinding {
+                            category: "Data Flow".to_string(),
+                            vuln_type: "Dead Store / Unused Assignment".to_string(),
+                            severity: 1,
+                            severity_label: "Informational".to_string(),
+                            id: "SOL-091".to_string(),
+                            cwe: Some("CWE-563".to_string()),
+                            location: filename.clone(),
+                            function_name: dead.function.clone(),
+                            line_number: 0,
+                            vulnerable_code: format!("{} = {} at {}", dead.var_name, dead.defining_expr, dead.location),
+                            description: format!(
+                                "Variable '{}' is assigned but never used afterwards. May indicate a missing state update or stale security check.",
+                                dead.var_name
+                            ),
+                            attack_scenario: String::new(),
+                            real_world_incident: None,
+                            secure_fix: "Remove the dead store or ensure the value is used in subsequent code.".to_string(),
+                            prevention: String::new(),
+                            confidence: 30,
+                        });
+                    }
+                }
+            }
+        }
+
+        // Phase 10: Context-sensitive taint analysis — tracks untrusted data from
+        //           sources (instruction data, unchecked accounts) to sinks (transfers,
+        //           CPI, state writes). Augments the basic Phase 3 lattice taint.
+        if let Some(ref dir) = self.program_dir {
+            let mut taint = taint_analyzer::TaintAnalyzer::new();
+            match taint.analyze_program(dir) {
+                Ok(flows) => {
+                    let converted: Vec<VulnerabilityFinding> = flows
+                        .into_iter()
+                        .map(taint_flow_to_vulnerability)
+                        .collect();
+                    findings.extend(converted);
+                }
+                Err(e) => {
+                    eprintln!("  {} Taint phase: {}", "⚠️".yellow(), e);
+                }
+            }
+        }
+
+        // ── Phases 11–15: Parallelized ──────────────────────────────────────
+        // These phases are independent of each other — parallelize for 2-4x speedup.
+        let program_dir = self.program_dir.clone();
+        let raw_sources = self.raw_sources.clone();
+
+        std::thread::scope(|s| {
+            // Phase 11: Geiger — unsafe code analysis (thread 1)
+            let phase11 = s.spawn(|| {
+                let mut results = Vec::new();
+                if let Some(ref dir) = program_dir {
+                    let mut geiger = geiger_analyzer::GeigerAnalyzer::new();
+                    match geiger.analyze_program(dir) {
+                        Ok(report) => {
+                            for gf in report.findings {
+                                let (severity, severity_label) = match gf.severity {
+                                    geiger_analyzer::report::GeigerSeverity::Critical => (5, "Critical".to_string()),
+                                    geiger_analyzer::report::GeigerSeverity::High     => (4, "High".to_string()),
+                                    geiger_analyzer::report::GeigerSeverity::Medium   => (3, "Medium".to_string()),
+                                    geiger_analyzer::report::GeigerSeverity::Low      => (2, "Low".to_string()),
+                                };
+                                results.push(VulnerabilityFinding {
+                                    category: "Unsafe Code".to_string(),
+                                    vuln_type: format!("{:?}", gf.category),
+                                    severity,
+                                    severity_label,
+                                    id: "SOL-093".to_string(),
+                                    cwe: Some(gf.cwe),
+                                    location: gf.file_path,
+                                    function_name: gf.function_name.unwrap_or_default(),
+                                    line_number: gf.line_number,
+                                    vulnerable_code: gf.unsafe_code_snippet,
+                                    description: format!("{} {}", gf.description, gf.risk_explanation),
+                                    attack_scenario: String::new(),
+                                    real_world_incident: None,
+                                    secure_fix: gf.fix_recommendation,
+                                    prevention: String::new(),
+                                    confidence: 45,
+                                });
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("  {} Geiger phase: {}", "⚠️".yellow(), e);
+                        }
+                    }
+                }
+                results
+            });
+
+            // Phase 12: Arithmetic security expert (thread 2)
+            let raw_sources_12 = raw_sources.clone();
+            let phase12 = s.spawn(move || {
+                let mut results = Vec::new();
+                for (filename, source) in &raw_sources_12 {
+                    if let Ok(issues) = arithmetic_security_expert::ArithmeticSecurityExpert::analyze_source(source) {
+                        for issue in issues {
+                            let raw_sev = issue.kind.severity();
+                            let sev = match raw_sev {
+                                8..=10 => 5u8, 6..=7 => 4, 4..=5 => 3, 2..=3 => 2, _ => 1,
+                            };
+                            results.push(VulnerabilityFinding {
+                                category: "Arithmetic".to_string(),
+                                vuln_type: format!("{:?}", issue.kind),
+                                severity: sev,
+                                severity_label: match sev {
+                                    5 => "Critical", 4 => "High", 3 => "Medium",
+                                    _ => "Low",
+                                }.to_string(),
+                                id: "SOL-094".to_string(),
+                                cwe: Some("CWE-190".to_string()),
+                                location: filename.clone(),
+                                function_name: String::new(),
+                                line_number: issue.line,
+                                vulnerable_code: issue.snippet.clone(),
+                                description: format!("{:?} at line {}", issue.kind, issue.line),
+                                attack_scenario: String::new(),
+                                real_world_incident: None,
+                                secure_fix: issue.recommendation,
+                                prevention: String::new(),
+                                confidence: 42,
+                            });
+                        }
+                    }
+                }
+                results
+            });
+
+            // Phase 13: L3X heuristic detector (thread 3)
+            let program_dir_13 = program_dir.clone();
+            let phase13 = s.spawn(move || {
+                let mut results = Vec::new();
+                if let Some(ref dir) = program_dir_13 {
+                    let mut l3x = l3x_analyzer::L3xAnalyzer::new();
+                    match l3x.analyze_program(dir) {
+                        Ok(report) => {
+                            for lf in report.findings {
+                                let (severity, severity_label) = match lf.severity {
+                                    l3x_analyzer::report::L3xSeverity::Critical => (5, "Critical".to_string()),
+                                    l3x_analyzer::report::L3xSeverity::High     => (4, "High".to_string()),
+                                    l3x_analyzer::report::L3xSeverity::Medium   => (3, "Medium".to_string()),
+                                    l3x_analyzer::report::L3xSeverity::Low      => (2, "Low".to_string()),
+                                    l3x_analyzer::report::L3xSeverity::Info     => (1, "Informational".to_string()),
+                                };
+                                results.push(VulnerabilityFinding {
+                                    category: format!("Heuristic Pattern Detection ({:?})", lf.category),
+                                    vuln_type: lf.description.clone(),
+                                    severity,
+                                    severity_label,
+                                    id: lf.id,
+                                    cwe: Some(lf.cwe),
+                                    location: lf.file_path,
+                                    function_name: lf.instruction,
+                                    line_number: lf.line_number,
+                                    vulnerable_code: lf.source_snippet.unwrap_or_default(),
+                                    description: format!("{} [ML reasoning: {}]", lf.description, lf.ml_reasoning),
+                                    attack_scenario: String::new(),
+                                    real_world_incident: None,
+                                    secure_fix: lf.fix_recommendation,
+                                    prevention: String::new(),
+                                    confidence: (lf.confidence * 100.0).min(255.0) as u8,
+                                });
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("  {} L3X phase: {}", "⚠️".yellow(), e);
+                        }
+                    }
+                }
+                results
+            });
+
+            // Phase 14: Invariant miner (thread 4)
+            let raw_sources_14 = raw_sources.clone();
+            let phase14 = s.spawn(move || {
+                let mut results = Vec::new();
+                for (filename, source) in &raw_sources_14 {
+                    let mut miner = invariant_miner::InvariantMiner::new();
+                    if miner.mine_from_source(source, filename).is_ok() {
+                        for violation in miner.get_potential_violations() {
+                            results.push(VulnerabilityFinding {
+                                category: "Invariant Violation".to_string(),
+                                vuln_type: format!("{:?}", violation.invariant.category),
+                                severity: 3,
+                                severity_label: "Medium".to_string(),
+                                id: "SOL-095".to_string(),
+                                cwe: Some("CWE-682".to_string()),
+                                location: filename.clone(),
+                                function_name: String::new(),
+                                line_number: 0,
+                                vulnerable_code: violation.invariant.expression.clone(),
+                                description: format!(
+                                    "Invariant '{}' may be violated. Counterexample: {}",
+                                    violation.invariant.expression,
+                                    violation.counterexample.as_deref().unwrap_or("none"),
+                                ),
+                                attack_scenario: String::new(),
+                                real_world_incident: None,
+                                secure_fix: format!("Add explicit check: {}", violation.invariant.expression),
+                                prevention: String::new(),
+                                confidence: 35,
+                            });
+                        }
+                    }
+                }
+                results
+            });
+
+            // Phase 15: Concolic execution (thread 5)
+            let raw_sources_15 = raw_sources.clone();
+            let phase15 = s.spawn(move || {
+                let mut results = Vec::new();
+                for (filename, source) in &raw_sources_15 {
+                    let config = concolic_executor::ConcolicConfig {
+                        max_depth: 10,
+                        max_paths: 50,
+                        timeout_ms: 5000,
+                        seed: 42,
+                    };
+                    let mut executor = concolic_executor::ConcolicExecutor::new(config);
+                    let mut initial_inputs = std::collections::HashMap::new();
+                    for line in source.lines() {
+                        let trimmed = line.trim();
+                        if trimmed.starts_with("pub fn ") || trimmed.starts_with("fn ") {
+                            if let Some(name) = trimmed.split('(').next() {
+                                let fn_name = name.replace("pub fn ", "").replace("fn ", "").trim().to_string();
+                                initial_inputs.insert(fn_name, u64::MAX);
+                            }
+                        }
+                    }
+                    let result = executor.execute(initial_inputs);
+                    for cf in result.vulnerabilities {
+                        let (severity, severity_label) = match cf.severity {
+                            concolic_executor::FindingSeverity::Critical => (5, "Critical".to_string()),
+                            concolic_executor::FindingSeverity::High     => (4, "High".to_string()),
+                            concolic_executor::FindingSeverity::Medium   => (3, "Medium".to_string()),
+                            concolic_executor::FindingSeverity::Low      => (2, "Low".to_string()),
+                        };
+                        results.push(VulnerabilityFinding {
+                            category: "Concolic Analysis".to_string(),
+                            vuln_type: cf.vulnerability_type,
+                            severity,
+                            severity_label,
+                            id: "SOL-096".to_string(),
+                            cwe: Some("CWE-119".to_string()),
+                            location: filename.clone(),
+                            function_name: cf.location.clone(),
+                            line_number: 0,
+                            vulnerable_code: format!("Triggered by: {:?}", cf.triggering_input),
+                            description: cf.description,
+                            attack_scenario: String::new(),
+                            real_world_incident: None,
+                            secure_fix: String::new(),
+                            prevention: String::new(),
+                            confidence: 55,
+                        });
+                    }
+                }
+                results
+            });
+
+            // Collect all parallel results
+            findings.extend(phase11.join().unwrap_or_default());
+            findings.extend(phase12.join().unwrap_or_default());
+            findings.extend(phase13.join().unwrap_or_default());
+            findings.extend(phase14.join().unwrap_or_default());
+            findings.extend(phase15.join().unwrap_or_default());
         });
+
+
+        // ─── Finding Enrichment Pass ────────────────────────────────────────
+        // Augment descriptions with knowledge from expert systems.
+        for f in &mut findings {
+            // Account security enrichment
+            if let Some(insight) = account_security_expert::AccountSecurityExpert::get_insight_for_id(&f.id) {
+                if f.prevention.is_empty() {
+                    f.prevention = insight.secure_pattern.clone();
+                }
+                if f.attack_scenario.is_empty() {
+                    f.attack_scenario = insight.attack_vector.clone();
+                }
+            }
+            // DeFi security enrichment
+            if let Some(insight) = defi_security_expert::DeFiSecurityExpert::get_defense_for_id(&f.id) {
+                if f.prevention.is_empty() {
+                    f.prevention = insight.defense_strategy.clone();
+                }
+            }
+        }
+
+        // ── Cross-phase dedup ────────────────────────────────────────────
+        // Same (vuln_type, location, line_number) found by multiple phases?
+        // Keep only the highest-confidence version.
+        {
+            use std::collections::HashMap;
+            let mut best: HashMap<String, usize> = HashMap::new();
+            for (idx, f) in findings.iter().enumerate() {
+                let key = if f.line_number > 0 {
+                    format!("{}:{}:{}", f.vuln_type, f.location, f.line_number)
+                } else {
+                    format!("{}:{}:{}", f.vuln_type, f.location, f.function_name)
+                };
+                best.entry(key)
+                    .and_modify(|existing_idx| {
+                        if findings[idx].confidence > findings[*existing_idx].confidence {
+                            *existing_idx = idx;
+                        }
+                    })
+                    .or_insert(idx);
+            }
+            let keep: std::collections::HashSet<usize> = best.into_values().collect();
+            let mut idx = 0;
+            findings.retain(|_| {
+                let k = keep.contains(&idx);
+                idx += 1;
+                k
+            });
+        }
 
         findings
     }
@@ -578,6 +985,262 @@ pub enum AnalyzerError {
     WalkDir(walkdir::Error),
 }
 
+// ─── Sec3 → VulnerabilityFinding conversion ─────────────────────────────────
+
+/// Convert a Sec3 finding into the standard VulnerabilityFinding format.
+///
+/// Maps Sec3 categories to SOL-xxx IDs in the existing detector namespace,
+/// preserving CWE mapping, severity, and source snippets.
+fn sec3_finding_to_vulnerability(f: sec3_analyzer::Sec3Finding) -> VulnerabilityFinding {
+    use sec3_analyzer::{Sec3Category, Sec3Severity};
+
+    // Map Sec3 severity to numeric (1-5) scale used by program-analyzer
+    let (severity, severity_label) = match f.severity {
+        Sec3Severity::Critical => (5, "Critical".to_string()),
+        Sec3Severity::High     => (4, "High".to_string()),
+        Sec3Severity::Medium   => (3, "Medium".to_string()),
+        Sec3Severity::Low      => (2, "Low".to_string()),
+        Sec3Severity::Info     => (1, "Info".to_string()),
+    };
+
+    // Map Sec3 categories to SOL-xxx IDs that don't collide with existing detectors
+    let (id, category, vuln_type) = match f.category {
+        Sec3Category::CloseAccountDrain => (
+            "SOL-070".to_string(),
+            "Account Safety".to_string(),
+            "Close Account Drain".to_string(),
+        ),
+        Sec3Category::DuplicateMutableAccounts => (
+            "SOL-071".to_string(),
+            "Account Safety".to_string(),
+            "Duplicate Mutable Accounts".to_string(),
+        ),
+        Sec3Category::UncheckedRemainingAccounts => (
+            "SOL-072".to_string(),
+            "Input Validation".to_string(),
+            "Unchecked Remaining Accounts".to_string(),
+        ),
+        Sec3Category::InsecurePDADerivation => (
+            "SOL-073".to_string(),
+            "Cryptographic".to_string(),
+            "Insecure PDA Derivation".to_string(),
+        ),
+        Sec3Category::ReInitialization => (
+            "SOL-074".to_string(),
+            "Account Safety".to_string(),
+            "Re-Initialization via init_if_needed".to_string(),
+        ),
+        Sec3Category::ArbitraryCPI => (
+            "SOL-075".to_string(),
+            "Access Control".to_string(),
+            "Arbitrary CPI Invocation".to_string(),
+        ),
+        Sec3Category::AccountConfusion => (
+            "SOL-076".to_string(),
+            "Type Safety".to_string(),
+            "Account Type Confusion".to_string(),
+        ),
+        Sec3Category::MissingDiscriminator => (
+            "SOL-077".to_string(),
+            "Type Safety".to_string(),
+            "Missing Discriminator Check".to_string(),
+        ),
+        Sec3Category::MissingRentExemption => (
+            "SOL-078".to_string(),
+            "Account Safety".to_string(),
+            "Missing Rent Exemption Check".to_string(),
+        ),
+        // These overlap with existing detectors — use existing SOL IDs
+        // so the deduplicator can merge them
+        Sec3Category::MissingOwnerCheck => (
+            "SOL-012".to_string(),
+            "Access Control".to_string(),
+            "Missing Owner Validation".to_string(),
+        ),
+        Sec3Category::MissingSignerCheck => (
+            "SOL-001".to_string(),
+            "Access Control".to_string(),
+            "Missing Signer Validation".to_string(),
+        ),
+        Sec3Category::IntegerOverflow => (
+            "SOL-006".to_string(),
+            "Arithmetic".to_string(),
+            "Integer Overflow/Underflow".to_string(),
+        ),
+    };
+
+    VulnerabilityFinding {
+        category,
+        vuln_type,
+        severity,
+        severity_label,
+        id,
+        cwe: Some(f.cwe),
+        location: f.file_path,
+        function_name: f.instruction,
+        line_number: f.line_number,
+        vulnerable_code: f.source_snippet.unwrap_or_default(),
+        description: f.description,
+        attack_scenario: String::new(),
+        real_world_incident: None,
+        secure_fix: f.fix_recommendation,
+        prevention: String::new(),
+        confidence: 50, // raw finding — will be adjusted by validation pipeline
+    }
+}
+
+// ─── Anchor → VulnerabilityFinding conversion ───────────────────────────────
+
+/// Convert an Anchor security finding into the standard VulnerabilityFinding format.
+fn anchor_finding_to_vulnerability(f: anchor_security_analyzer::report::AnchorFinding) -> VulnerabilityFinding {
+    use anchor_security_analyzer::report::{AnchorSeverity, AnchorViolation};
+
+    let (severity, severity_label) = match f.severity {
+        AnchorSeverity::Critical => (5, "Critical".to_string()),
+        AnchorSeverity::High     => (4, "High".to_string()),
+        AnchorSeverity::Medium   => (3, "Medium".to_string()),
+        AnchorSeverity::Low      => (2, "Low".to_string()),
+    };
+
+    // Net-new Anchor detectors get SOL-080+ IDs.
+    // Overlapping ones map to existing IDs for dedup.
+    let (id, category, vuln_type) = match f.violation {
+        // --- Net-new Anchor-specific detectors ---
+        AnchorViolation::WeakConstraint => (
+            "SOL-080".to_string(),
+            "Anchor Safety".to_string(),
+            "Weak Account Constraint".to_string(),
+        ),
+        AnchorViolation::InvalidTokenHook => (
+            "SOL-081".to_string(),
+            "Token Safety".to_string(),
+            "Invalid Token-2022 Transfer Hook".to_string(),
+        ),
+        AnchorViolation::MissingHasOne => (
+            "SOL-082".to_string(),
+            "Anchor Safety".to_string(),
+            "Missing has_one Constraint".to_string(),
+        ),
+        AnchorViolation::UnsafeConstraintExpression => (
+            "SOL-083".to_string(),
+            "Anchor Safety".to_string(),
+            "Unsafe Constraint Expression".to_string(),
+        ),
+        AnchorViolation::MissingBumpValidation => (
+            "SOL-084".to_string(),
+            "Cryptographic".to_string(),
+            "Missing Bump Validation".to_string(),
+        ),
+        AnchorViolation::MissingSpaceCalculation => (
+            "SOL-085".to_string(),
+            "Anchor Safety".to_string(),
+            "Missing Space Calculation".to_string(),
+        ),
+        AnchorViolation::MissingRentExemption => (
+            "SOL-086".to_string(),
+            "Account Safety".to_string(),
+            "Missing Rent Exemption".to_string(),
+        ),
+        AnchorViolation::UncheckedAccountType => (
+            "SOL-087".to_string(),
+            "Type Safety".to_string(),
+            "Unchecked Account Type".to_string(),
+        ),
+        // --- Overlap with existing detectors (use same SOL IDs for dedup) ---
+        AnchorViolation::MissingSignerCheck => (
+            "SOL-001".to_string(),
+            "Access Control".to_string(),
+            "Missing Signer Validation".to_string(),
+        ),
+        AnchorViolation::MissingOwnerCheck => (
+            "SOL-012".to_string(),
+            "Access Control".to_string(),
+            "Missing Owner Validation".to_string(),
+        ),
+        AnchorViolation::MissingPDAValidation => (
+            "SOL-073".to_string(),
+            "Cryptographic".to_string(),
+            "Missing PDA Validation".to_string(),
+        ),
+        AnchorViolation::MissingCPIGuard => (
+            "SOL-017".to_string(),
+            "Access Control".to_string(),
+            "Missing CPI Guard".to_string(),
+        ),
+        AnchorViolation::ReinitializationVulnerability => (
+            "SOL-074".to_string(),
+            "Account Safety".to_string(),
+            "Reinitialization Vulnerability".to_string(),
+        ),
+        AnchorViolation::MissingCloseGuard => (
+            "SOL-070".to_string(),
+            "Account Safety".to_string(),
+            "Missing Close Guard".to_string(),
+        ),
+    };
+
+    // Build function name from struct_name + field_name
+    let function_name = match (&f.struct_name, &f.field_name) {
+        (Some(s), Some(field)) => format!("{}::{}", s, field),
+        (Some(s), None) => s.clone(),
+        (None, Some(field)) => field.clone(),
+        (None, None) => "unknown".to_string(),
+    };
+
+    VulnerabilityFinding {
+        category,
+        vuln_type,
+        severity,
+        severity_label,
+        id,
+        cwe: Some(f.cwe),
+        location: f.file_path,
+        function_name,
+        line_number: f.line_number,
+        vulnerable_code: f.code_snippet,
+        description: format!("{} {}", f.description, f.risk_explanation),
+        attack_scenario: String::new(),
+        real_world_incident: None,
+        secure_fix: f.fix_recommendation,
+        prevention: f.anchor_pattern,
+        confidence: 50,
+    }
+}
+
+// ─── TaintFlow → VulnerabilityFinding conversion ────────────────────────────
+
+/// Convert a taint-analyzer TaintFlow into the standard VulnerabilityFinding format.
+fn taint_flow_to_vulnerability(flow: taint_analyzer::TaintFlow) -> VulnerabilityFinding {
+    let (severity, severity_label) = match flow.severity {
+        taint_analyzer::TaintSeverity::Critical => (5, "Critical".to_string()),
+        taint_analyzer::TaintSeverity::High     => (4, "High".to_string()),
+        taint_analyzer::TaintSeverity::Medium   => (3, "Medium".to_string()),
+        taint_analyzer::TaintSeverity::Low      => (2, "Low".to_string()),
+    };
+
+    let path_str = flow.path.join(" → ");
+    let location = flow.path.first().cloned().unwrap_or_default();
+
+    VulnerabilityFinding {
+        category: "Taint Analysis".to_string(),
+        vuln_type: format!("Tainted Data Flow: {:?} → {:?}", flow.source, flow.sink),
+        severity,
+        severity_label,
+        id: "SOL-092".to_string(),
+        cwe: Some("CWE-20".to_string()),
+        location,
+        function_name: String::new(),
+        line_number: 0,
+        vulnerable_code: path_str,
+        description: flow.description,
+        attack_scenario: String::new(),
+        real_world_incident: None,
+        secure_fix: flow.recommendation,
+        prevention: String::new(),
+        confidence: 45,
+    }
+}
+
 /// Convenience function for LSP / single-file analysis.
 ///
 /// Parses the source string, runs all 6 analysis engines + validation pipeline,
@@ -595,5 +1258,310 @@ pub fn scan_source_code(source: &str, filename: &str) -> Vec<VulnerabilityFindin
             findings
         }
         Err(_) => Vec::new(),
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  PHASE 1 — Integration tests for all 16 analysis phases + enrichment
+// ═══════════════════════════════════════════════════════════════════════════
+#[cfg(test)]
+mod pipeline_tests {
+    use super::*;
+
+    /// Helper: create a ProgramAnalyzer from inline source code
+    fn analyze(src: &str) -> Vec<VulnerabilityFinding> {
+        let analyzer = ProgramAnalyzer::from_source(src)
+            .expect("should parse test source");
+        analyzer.scan_for_vulnerabilities_raw()
+    }
+
+    /// Helper: same but with full validation pipeline
+    fn analyze_validated(src: &str) -> Vec<VulnerabilityFinding> {
+        let analyzer = ProgramAnalyzer::from_source(src)
+            .expect("should parse test source");
+        analyzer.scan_for_vulnerabilities()
+    }
+
+    // ─── Phase 1–6 (core engine) smoke test ─────────────────────────────
+    #[test]
+    fn test_core_phases_detect_missing_signer() {
+        let src = r#"
+            use anchor_lang::prelude::*;
+            pub fn transfer(ctx: Context<Transfer>, amount: u64) -> Result<()> {
+                let vault = &mut ctx.accounts.vault;
+                vault.balance -= amount;
+                Ok(())
+            }
+            #[derive(Accounts)]
+            pub struct Transfer<'info> {
+                #[account(mut)]
+                pub vault: Account<'info, Vault>,
+                pub user: AccountInfo<'info>,
+            }
+            #[account]
+            pub struct Vault { pub balance: u64 }
+        "#;
+        let findings = analyze(src);
+        assert!(!findings.is_empty(), "should detect at least one finding");
+    }
+
+    // ─── Phase 12 (arithmetic-security-expert) ───────────────────────
+    #[test]
+    fn test_phase12_arithmetic_detects_unchecked_add() {
+        let src = r#"
+            use anchor_lang::prelude::*;
+            pub fn deposit(ctx: Context<Deposit>, amount: u64) -> Result<()> {
+                let state = &mut ctx.accounts.state;
+                state.total = state.total + amount;
+                Ok(())
+            }
+            #[derive(Accounts)]
+            pub struct Deposit<'info> {
+                #[account(mut)]
+                pub state: Account<'info, State>,
+            }
+            #[account]
+            pub struct State { pub total: u64 }
+        "#;
+        let findings = analyze(src);
+        // Phase 12 or Phase 1–6 should detect unchecked arithmetic
+        let arithmetic = findings.iter().any(|f|
+            f.id.contains("SOL-006") ||
+            f.id.contains("SOL-094") ||
+            f.category.contains("Arithmetic") ||
+            f.vuln_type.contains("overflow") ||
+            f.vuln_type.contains("Arithmetic") ||
+            f.description.to_lowercase().contains("overflow")
+        );
+        assert!(arithmetic, "should detect unchecked arithmetic: found {:?}",
+            findings.iter().map(|f| format!("{}: {}", f.id, f.vuln_type)).collect::<Vec<_>>());
+    }
+
+    // ─── Phase 14 (invariant-miner) ─────────────────────────────────
+    #[test]
+    fn test_phase14_invariant_miner_runs() {
+        let src = r#"
+            pub fn process(amount: u64) -> u64 {
+                assert!(amount > 0);
+                let result = amount * 2;
+                assert!(result > amount);
+                result
+            }
+        "#;
+        // Invariant miner should at least parse without crashing
+        let findings = analyze(src);
+        // The test is that it doesn't panic — invariant violations are optional
+        let _ = findings;
+    }
+
+    // ─── Phase 15 (concolic-executor) ────────────────────────────────
+    #[test]
+    fn test_phase15_concolic_executor_runs() {
+        let src = r#"
+            pub fn withdraw(amount: u64, balance: u64) -> u64 {
+                if amount > balance {
+                    panic!("insufficient");
+                }
+                balance - amount
+            }
+        "#;
+        // Concolic executor should run without crashing
+        let findings = analyze(src);
+        let _ = findings;
+    }
+
+    // ─── Enrichment ─────────────────────────────────────────────────
+    #[test]
+    fn test_enrichment_populates_prevention_and_attack() {
+        let src = r#"
+            use anchor_lang::prelude::*;
+            pub fn withdraw(ctx: Context<Withdraw>, amount: u64) -> Result<()> {
+                let vault = &mut ctx.accounts.vault;
+                vault.balance = vault.balance - amount;
+                **vault.to_account_info().try_borrow_mut_lamports()? -= amount;
+                **ctx.accounts.user.try_borrow_mut_lamports()? += amount;
+                Ok(())
+            }
+            #[derive(Accounts)]
+            pub struct Withdraw<'info> {
+                #[account(mut)]
+                pub vault: Account<'info, Vault>,
+                pub user: AccountInfo<'info>,
+                pub system_program: Program<'info, System>,
+            }
+            #[account]
+            pub struct Vault { pub balance: u64 }
+        "#;
+        let findings = analyze(src);
+        // At least some findings should have enriched prevention/attack_scenario
+        let enriched = findings.iter().any(|f|
+            !f.prevention.is_empty() || !f.attack_scenario.is_empty()
+        );
+        assert!(enriched,
+            "enrichment pass should populate prevention or attack_scenario for at least one finding");
+    }
+
+    // ─── Cross-phase dedup ──────────────────────────────────────────
+    #[test]
+    fn test_cross_phase_dedup_no_exact_duplicates() {
+        let src = r#"
+            use anchor_lang::prelude::*;
+            pub fn transfer(ctx: Context<Transfer>, amount: u64) -> Result<()> {
+                let vault = &mut ctx.accounts.vault;
+                vault.balance = vault.balance + amount;
+                Ok(())
+            }
+            #[derive(Accounts)]
+            pub struct Transfer<'info> {
+                #[account(mut)]
+                pub vault: Account<'info, Vault>,
+                pub user: AccountInfo<'info>,
+            }
+            #[account]
+            pub struct Vault { pub balance: u64 }
+        "#;
+        let findings = analyze(src);
+        // No two findings should have the exact same (vuln_type, location, line_number)
+        let mut keys = std::collections::HashSet::new();
+        for f in &findings {
+            let key = format!("{}:{}:{}", f.vuln_type, f.location, f.line_number);
+            if f.line_number > 0 {
+                assert!(keys.insert(key.clone()),
+                    "duplicate finding detected after dedup: {}", key);
+            }
+        }
+    }
+
+    // ─── from_source basics ─────────────────────────────────────────
+    #[test]
+    fn test_from_source_parses_valid_rust() {
+        let analyzer = ProgramAnalyzer::from_source("fn main() {}");
+        assert!(analyzer.is_ok());
+    }
+
+    #[test]
+    fn test_from_source_rejects_invalid_rust() {
+        let analyzer = ProgramAnalyzer::from_source("this is not rust {{{{");
+        assert!(analyzer.is_err());
+    }
+
+    // ─── scan_source_code convenience function ──────────────────────
+    #[test]
+    fn test_scan_source_code_returns_findings() {
+        let src = r#"
+            use anchor_lang::prelude::*;
+            pub fn bad(ctx: Context<Bad>, amt: u64) -> Result<()> {
+                let v = &mut ctx.accounts.vault;
+                v.x = v.x + amt;
+                Ok(())
+            }
+            #[derive(Accounts)]
+            pub struct Bad<'info> {
+                #[account(mut)]
+                pub vault: Account<'info, Vault>,
+            }
+            #[account]
+            pub struct Vault { pub x: u64 }
+        "#;
+        // Use raw scan — the validated pipeline may aggressively filter
+        // short inline snippets that lack full project context
+        let analyzer = ProgramAnalyzer::from_source(src).expect("should parse");
+        let findings = analyzer.scan_for_vulnerabilities_raw();
+        assert!(!findings.is_empty(), "should find vulns in inline source");
+    }
+
+    // ─── Integration test against real vulnerable program ────────────
+    #[test]
+    fn test_vulnerable_token_regression() {
+        let program_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent().unwrap()  // crates/
+            .parent().unwrap()  // project root
+            .join("programs/vulnerable-token");
+
+        if !program_dir.exists() {
+            // Skip if test programs not available
+            eprintln!("Skipping: vulnerable-token not found at {:?}", program_dir);
+            return;
+        }
+
+        let analyzer = ProgramAnalyzer::new(&program_dir)
+            .expect("should parse vulnerable-token");
+        let findings = analyzer.scan_for_vulnerabilities();
+
+        // vulnerable-token has intentional bugs: missing signer, unchecked math, etc.
+        assert!(findings.len() >= 5,
+            "vulnerable-token should produce at least 5 findings, got {}",
+            findings.len());
+
+        // At least one should be HIGH or CRITICAL (severity >= 4)
+        let high_or_crit = findings.iter().filter(|f| f.severity >= 4).count();
+        assert!(high_or_crit >= 1,
+            "should have at least 1 HIGH/CRITICAL finding, got {}", high_or_crit);
+    }
+
+    #[test]
+    fn test_vulnerable_vault_regression() {
+        let program_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent().unwrap()
+            .parent().unwrap()
+            .join("programs/vulnerable-vault");
+
+        if !program_dir.exists() {
+            eprintln!("Skipping: vulnerable-vault not found at {:?}", program_dir);
+            return;
+        }
+
+        let analyzer = ProgramAnalyzer::new(&program_dir)
+            .expect("should parse vulnerable-vault");
+        let findings = analyzer.scan_for_vulnerabilities();
+
+        assert!(findings.len() >= 3,
+            "vulnerable-vault should produce at least 3 findings, got {}",
+            findings.len());
+    }
+
+    #[test]
+    fn test_vulnerable_staking_regression() {
+        let program_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent().unwrap()
+            .parent().unwrap()
+            .join("programs/vulnerable-staking");
+
+        if !program_dir.exists() {
+            eprintln!("Skipping: vulnerable-staking not found at {:?}", program_dir);
+            return;
+        }
+
+        let analyzer = ProgramAnalyzer::new(&program_dir)
+            .expect("should parse vulnerable-staking");
+        let findings = analyzer.scan_for_vulnerabilities();
+
+        assert!(findings.len() >= 3,
+            "vulnerable-staking should produce at least 3 findings, got {}",
+            findings.len());
+    }
+
+    // ─── Confidence scores ──────────────────────────────────────────
+    #[test]
+    fn test_confidence_scores_are_nonzero() {
+        let src = r#"
+            use anchor_lang::prelude::*;
+            pub fn bad(ctx: Context<Bad>, val: u64) -> Result<()> {
+                let s = &mut ctx.accounts.state;
+                s.x = s.x + val;
+                Ok(())
+            }
+            #[derive(Accounts)]
+            pub struct Bad<'info> {
+                #[account(mut)]
+                pub state: Account<'info, MyState>,
+            }
+            #[account]
+            pub struct MyState { pub x: u64 }
+        "#;
+        let findings = analyze_validated(src);
+        for f in &findings {
+            assert!(f.confidence > 0, "confidence should be > 0 for finding: {}", f.id);
+        }
     }
 }

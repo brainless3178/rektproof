@@ -32,3 +32,22 @@ shanon-monitor = { path = "../shanon-monitor" }
 compliance-reporter = { path = "../compliance-reporter" }
 shanon-verify = { path = "../shanon-verify" }
 ai-enhancer = { path = "../ai-enhancer" }
+secure-code-gen = { path = "../experimental/secure-code-gen" }
+attack-simulator = { path = "../experimental/attack-simulator" }
+transaction-forge = { path = "../experimental/transaction-forge" }
+git-scanner = { path = "../experimental/git-scanner" }
+llm-strategist = { path = "../experimental/llm-strategist" }
+consensus-engine = { path = "../experimental/consensus-engine" }
+benchmark-suite = { path = "../experimental/benchmark-suite" }
+integration-orchestrator = { path = "../experimental/integration-orchestrator" }
+kani-verifier = { path = "../experimental/kani-verifier" }
+certora-prover = { path = "../experimental/certora-prover" }
+wacana-analyzer = { path = "../experimental/wacana-analyzer" }
+economic-verifier = { path = "../experimental/economic-verifier" }
+trident-fuzzer = { path = "../experimental/trident-fuzzer" }
+fuzzdelsol = { path = "../experimental/fuzzdelsol" }
+crux-mir-analyzer = { path = "../experimental/crux-mir-analyzer" }
+fv-scanner-core = { path = "../experimental/fv-scanner-core" }
+concolic-executor = { path = "../experimental/concolic-executor" }
+security-fuzzer = { path = "../experimental/security-fuzzer" }
+z3 = "0.12"

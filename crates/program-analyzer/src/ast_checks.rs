@@ -7,12 +7,133 @@
 //!
 //! This eliminates false positives caused by string patterns matching
 //! comments, field names, or unrelated code.
+//!
+//! ## Interprocedural Authorization Detection
+//!
+//! Native Solana programs (non-Anchor) enforce authorization via function calls
+//! rather than type-level constraints. For example:
+//! - `get_governance_data(program_id, account_info)?` validates ownership
+//! - `assert_can_execute_transaction(...)` gates state transitions
+//! - `find_program_address(seeds, program_id)` validates PDA derivation
+//!
+//! The `has_interprocedural_auth` function scans the same code block for these
+//! patterns, allowing checkers to suppress false positives when authorization
+//! is handled interprocedurally.
 
 use syn::visit::Visit;
 use syn::{
     BinOp, Expr, ExprBinary, ExprCall, ExprField, ExprMethodCall,
     Field, Fields, Item, ItemFn, ItemStruct, Type, TypePath,
 };
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//  Interprocedural Authorization Detection
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+/// Returns true if the code contains evidence of interprocedural authorization.
+///
+/// This detects authorization patterns common in native Solana programs where
+/// access control is enforced via function calls rather than type-level
+/// annotations (Anchor's Signer<>, has_one, constraint).
+///
+/// Recognized patterns:
+/// 1. **assert_* calls with ?** — `assert_can_execute(...)` / `assert_signer(...)`
+/// 2. **get_*_data(program_id, ...)** — ownership-validating deserializers
+/// 3. **find_program_address / create_program_address** — PDA seed validation
+/// 4. **invoke_signed with PDA seeds** — PDA signer IS the authorization
+/// 5. **is_signer field access** — direct signer checks in function body
+pub fn has_interprocedural_auth(code: &str) -> bool {
+    let parsed = match syn::parse_file(code) {
+        Ok(f) => f,
+        Err(_) => return false,
+    };
+
+    let mut detector = InterproceduralAuthDetector::default();
+    detector.visit_file(&parsed);
+
+    detector.has_auth
+}
+
+#[derive(Default)]
+struct InterproceduralAuthDetector {
+    has_auth: bool,
+}
+
+impl<'ast> Visit<'ast> for InterproceduralAuthDetector {
+    fn visit_expr_call(&mut self, node: &'ast ExprCall) {
+        let call_str = quote::quote!(#node.func).to_string();
+        let call_lower = call_str.to_lowercase();
+
+        // Pattern 1: assert_* validation functions (assert_can_execute, assert_signer, etc.)
+        if call_lower.starts_with("assert_") || call_lower.starts_with("assert ::") {
+            self.has_auth = true;
+        }
+
+        // Pattern 2: get_*_data(program_id, ...) — ownership-validating deserializer
+        // These functions verify account_info.owner == program_id before deserializing
+        if (call_lower.starts_with("get_") && call_lower.contains("_data"))
+            || call_lower.starts_with("get_account_data")
+        {
+            // Only count as auth if program_id is passed as first arg
+            if let Some(first_arg) = node.args.first() {
+                let arg_str = quote::quote!(#first_arg).to_string();
+                if arg_str.contains("program_id") {
+                    self.has_auth = true;
+                }
+            }
+        }
+
+        // Pattern 3: PDA derivation — find_program_address / create_program_address
+        if call_str.contains("find_program_address")
+            || call_str.contains("create_program_address")
+        {
+            self.has_auth = true;
+        }
+
+        syn::visit::visit_expr_call(self, node);
+    }
+
+    fn visit_expr_method_call(&mut self, node: &'ast ExprMethodCall) {
+        let method = node.method.to_string();
+        let method_lower = method.to_lowercase();
+
+        // Pattern 1: .assert_*() method calls
+        if method_lower.starts_with("assert_") {
+            self.has_auth = true;
+        }
+
+        // Pattern 4: invoke_signed — the PDA signer IS the authorization
+        if method == "invoke_signed" {
+            self.has_auth = true;
+        }
+
+        syn::visit::visit_expr_method_call(self, node);
+    }
+
+    fn visit_expr_field(&mut self, node: &'ast ExprField) {
+        // Pattern 5: .is_signer access
+        if let syn::Member::Named(ident) = &node.member {
+            if ident == "is_signer" {
+                self.has_auth = true;
+            }
+        }
+        syn::visit::visit_expr_field(self, node);
+    }
+
+    fn visit_expr_macro(&mut self, node: &'ast syn::ExprMacro) {
+        let mac_name = node.mac.path.segments.last()
+            .map(|s| s.ident.to_string())
+            .unwrap_or_default();
+        // msg! is logging, not auth. But require!, ensure!, assert! are auth.
+        if mac_name == "require" || mac_name == "require_keys_eq"
+            || mac_name == "require_eq" || mac_name == "ensure"
+            || mac_name == "assert" || mac_name == "access_control"
+        {
+            self.has_auth = true;
+        }
+        syn::visit::visit_expr_macro(self, node);
+    }
+}
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 //  SOL-001: Missing Signer Check — AST version
@@ -264,7 +385,14 @@ pub fn ast_has_missing_access_control(code: &str) -> bool {
     let mut checker = AccessControlChecker::default();
     checker.visit_file(&parsed);
 
-    checker.has_state_mutation && !checker.has_authorization
+    // Check interprocedural auth: if the function calls assert_*, get_*_data(program_id),
+    // or accesses .is_signer, authorization exists via called functions
+    if checker.has_state_mutation && !checker.has_authorization {
+        // Fall through to interprocedural check
+        !has_interprocedural_auth(code)
+    } else {
+        false
+    }
 }
 
 #[derive(Default)]
@@ -410,6 +538,11 @@ impl<'ast> Visit<'ast> for PrivEscChecker {
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 /// Returns true if the code has state writes AFTER CPI calls (reentrancy pattern).
+///
+/// Suppresses findings when:
+/// - The function validates authorization before the CPI (assert_*, get_*_data)
+/// - The CPI uses invoke_signed with PDA seeds (PDA is controlled, not arbitrary)
+/// - State writes after CPI are recording execution results (governance pattern)
 pub fn ast_has_reentrancy(code: &str) -> bool {
     let parsed = match syn::parse_file(code) {
         Ok(f) => f,
@@ -419,7 +552,18 @@ pub fn ast_has_reentrancy(code: &str) -> bool {
     let mut checker = ReentrancyChecker::default();
     checker.visit_file(&parsed);
 
-    checker.has_state_write_after_cpi
+    // If state write after CPI detected, check if context shows it's safe:
+    // - invoke_signed means the CPI target is PDA-controlled (not arbitrary callback)
+    // - Interprocedural auth (assert_can_execute, get_*_data) means access is gated
+    if checker.has_state_write_after_cpi {
+        // invoke_signed with prior validation = governance execution pattern, not reentrancy
+        if checker.uses_invoke_signed && has_interprocedural_auth(code) {
+            return false;
+        }
+        true
+    } else {
+        false
+    }
 }
 
 #[derive(Default)]
@@ -428,6 +572,8 @@ struct ReentrancyChecker {
     /// Tracks if we've seen a CPI call in the current function
     seen_cpi: bool,
     in_function: bool,
+    /// Whether any invoke_signed call exists (PDA-controlled CPI)
+    uses_invoke_signed: bool,
 }
 
 impl<'ast> Visit<'ast> for ReentrancyChecker {
@@ -444,7 +590,10 @@ impl<'ast> Visit<'ast> for ReentrancyChecker {
     fn visit_expr_call(&mut self, node: &'ast ExprCall) {
         if self.in_function {
             let call_str = quote::quote!(#node.func).to_string();
-            if call_str.contains("invoke") || call_str.contains("invoke_signed")
+            if call_str.contains("invoke_signed") {
+                self.seen_cpi = true;
+                self.uses_invoke_signed = true;
+            } else if call_str.contains("invoke")
                 || call_str.contains("transfer") || call_str.contains("cpi")
             {
                 self.seen_cpi = true;
@@ -456,7 +605,10 @@ impl<'ast> Visit<'ast> for ReentrancyChecker {
     fn visit_expr_method_call(&mut self, node: &'ast ExprMethodCall) {
         let method = node.method.to_string();
         if self.in_function {
-            if method == "invoke" || method == "invoke_signed"
+            if method == "invoke_signed" {
+                self.seen_cpi = true;
+                self.uses_invoke_signed = true;
+            } else if method == "invoke"
                 || method == "transfer" || method.contains("cpi")
             {
                 self.seen_cpi = true;
@@ -610,19 +762,35 @@ pub fn ast_has_arbitrary_cpi(code: &str) -> bool {
     let mut checker = CpiChecker::default();
     checker.visit_file(&parsed);
 
-    checker.has_cpi_invoke && !checker.has_program_validation
+    if checker.has_cpi_invoke && !checker.has_program_validation {
+        // Suppress if interprocedural auth shows this is PDA-signed or validated
+        // CPI invocations using invoke_signed with PDA seeds are inherently
+        // controlled — the program derives the signer, not the caller
+        if checker.uses_invoke_signed {
+            return false;
+        }
+        // Also suppress if interprocedural auth (assert_*, get_*_data) is present
+        !has_interprocedural_auth(code)
+    } else {
+        false
+    }
 }
 
 #[derive(Default)]
 struct CpiChecker {
     has_cpi_invoke: bool,
     has_program_validation: bool,
+    /// Whether invoke_signed is used (PDA-controlled CPI)
+    uses_invoke_signed: bool,
 }
 
 impl<'ast> Visit<'ast> for CpiChecker {
     fn visit_expr_call(&mut self, node: &'ast ExprCall) {
         let call_str = quote::quote!(#node.func).to_string();
-        if call_str.contains("invoke") || call_str.contains("invoke_signed") {
+        if call_str.contains("invoke_signed") {
+            self.has_cpi_invoke = true;
+            self.uses_invoke_signed = true;
+        } else if call_str.contains("invoke") {
             self.has_cpi_invoke = true;
         }
         syn::visit::visit_expr_call(self, node);
@@ -630,7 +798,10 @@ impl<'ast> Visit<'ast> for CpiChecker {
 
     fn visit_expr_method_call(&mut self, node: &'ast ExprMethodCall) {
         let method = node.method.to_string();
-        if method == "invoke" || method == "invoke_signed" {
+        if method == "invoke_signed" {
+            self.has_cpi_invoke = true;
+            self.uses_invoke_signed = true;
+        } else if method == "invoke" {
             self.has_cpi_invoke = true;
         }
         syn::visit::visit_expr_method_call(self, node);

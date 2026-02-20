@@ -25,13 +25,13 @@ impl VerificationLagDetector {
         // Get current slot
         let slot = rpc_client.get_slot()?;
 
-        // Simulate verification lag detection (in production, compare block timestamps)
-        let simulated_lag_ms = self.measure_verification_lag(rpc_client, slot)?;
+        // Measure verification lag from consecutive block timestamps
+        let measured_lag_ms = self.measure_verification_lag(rpc_client, slot)?;
 
-        if simulated_lag_ms > self.threshold_ms {
-            let severity = if simulated_lag_ms > self.threshold_ms * 3 {
+        if measured_lag_ms > self.threshold_ms {
+            let severity = if measured_lag_ms > self.threshold_ms * 3 {
                 FiredancerSeverity::Critical
-            } else if simulated_lag_ms > self.threshold_ms * 2 {
+            } else if measured_lag_ms > self.threshold_ms * 2 {
                 FiredancerSeverity::High
             } else {
                 FiredancerSeverity::Medium
@@ -45,9 +45,9 @@ impl VerificationLagDetector {
                 timestamp: chrono::Utc::now().to_rfc3339(),
                 description: format!(
                     "Verification lag detected: {}ms (threshold: {}ms)",
-                    simulated_lag_ms, self.threshold_ms
+                    measured_lag_ms, self.threshold_ms
                 ),
-                measured_value: simulated_lag_ms as f64,
+                measured_value: measured_lag_ms as f64,
                 threshold_value: self.threshold_ms as f64,
                 risk_explanation:
                     "High verification lag delays transaction finality and can cause \
@@ -66,20 +66,46 @@ impl VerificationLagDetector {
     fn measure_verification_lag(
         &self,
         rpc_client: &RpcClient,
-        _slot: u64,
+        slot: u64,
     ) -> Result<u64, anyhow::Error> {
-        // In production: compare block production time vs verification time
-        // For now, simulate by checking recent block times
-        let recent_perf = rpc_client.get_recent_performance_samples(Some(1))?;
+        // Measure real verification lag by comparing block timestamps
+        // between consecutive confirmed slots.
+        //
+        // Solana targets ~400ms per slot. Lag is the delta between the
+        // actual inter-block time and the expected slot time.
 
-        if let Some(sample) = recent_perf.first() {
-            // Estimate lag from sample data
-            let non_vote_tx = sample.num_non_vote_transactions.unwrap_or(0) as f64;
-            let slots = sample.num_slots as f64;
-            let estimated_lag = (non_vote_tx / slots * 10.0) as u64;
-            Ok(estimated_lag.min(2000)) // Cap at 2s
-        } else {
-            Ok(0)
+        // Fetch block times for the current and previous slot
+        let current_time = rpc_client.get_block_time(slot);
+        let prev_slot = slot.saturating_sub(1);
+        let prev_time = rpc_client.get_block_time(prev_slot);
+
+        match (current_time, prev_time) {
+            (Ok(curr), Ok(prev)) => {
+                // Block times are in Unix seconds; convert delta to milliseconds
+                let delta_ms = ((curr - prev).unsigned_abs()) * 1000;
+
+                // Expected slot time is 400ms; lag is the excess
+                let expected_slot_ms = 400u64;
+                let lag = delta_ms.saturating_sub(expected_slot_ms);
+                Ok(lag.min(5000)) // Cap at 5s to avoid outlier skew
+            }
+            _ => {
+                // Fallback: use performance samples if block times unavailable
+                let recent_perf = rpc_client.get_recent_performance_samples(Some(1))?;
+                if let Some(sample) = recent_perf.first() {
+                    // Compute average slot time from sample period
+                    if sample.num_slots > 0 {
+                        let avg_slot_ms =
+                            (sample.sample_period_secs as u64 * 1000) / sample.num_slots;
+                        let lag = avg_slot_ms.saturating_sub(400);
+                        Ok(lag.min(5000))
+                    } else {
+                        Ok(0)
+                    }
+                } else {
+                    Ok(0)
+                }
+            }
         }
     }
 
