@@ -1,34 +1,11 @@
-//! # Finding Converters
-//!
-//! Converts findings from each analysis engine's native format into the
-//! universal [`VulnerabilityFinding`] struct. Each converter handles:
-//!
-//! - Severity mapping (engine-specific → 1–5 numeric scale)
-//! - SOL-xxx ID assignment (using [`vuln_registry`] ranges)
-//! - CWE mapping
-//! - Source location extraction
-//!
-//! ## Converter Ownership
-//!
-//! | Converter | Source Engine | SOL ID Range |
-//! |-----------|-------------|-------------|
-//! | [`sec3_finding_to_vulnerability`] | sec3-analyzer | SOL-070–078 |
-//! | [`anchor_finding_to_vulnerability`] | anchor-security-analyzer | SOL-080–087 |
-//! | [`taint_flow_to_vulnerability`] | taint-analyzer | SOL-092 |
+//! Converts findings from each analysis engine into the common
+//! `VulnerabilityFinding` format used across the pipeline.
 
 use crate::VulnerabilityFinding;
 
-// ─── Sec3 → VulnerabilityFinding ─────────────────────────────────────────────
-
-/// Convert a Sec3 finding into the standard VulnerabilityFinding format.
-///
-/// Maps Sec3 categories to SOL-xxx IDs in the existing detector namespace,
-/// preserving CWE mapping, severity, and source snippets.
-///
-/// # ID Collisions
-///
-/// Some Sec3 categories overlap with core detectors (owner, signer, integer).
-/// These map to the same SOL-xxx IDs so the deduplicator can merge them.
+/// Maps a sec3-analyzer finding to VulnerabilityFinding.
+/// Overlapping categories (owner, signer, integer) use the same SOL IDs
+/// as core detectors so dedup can merge them.
 pub fn sec3_finding_to_vulnerability(f: sec3_analyzer::Sec3Finding) -> VulnerabilityFinding {
     use sec3_analyzer::{Sec3Category, Sec3Severity};
 
@@ -124,12 +101,7 @@ pub fn sec3_finding_to_vulnerability(f: sec3_analyzer::Sec3Finding) -> Vulnerabi
     }
 }
 
-// ─── Anchor → VulnerabilityFinding ───────────────────────────────────────────
-
-/// Convert an Anchor security finding into the standard VulnerabilityFinding format.
-///
-/// Net-new Anchor detectors get SOL-080+ IDs.
-/// Overlapping ones map to existing IDs for dedup.
+/// Maps an anchor-security-analyzer finding to VulnerabilityFinding.
 pub fn anchor_finding_to_vulnerability(f: anchor_security_analyzer::report::AnchorFinding) -> VulnerabilityFinding {
     use anchor_security_analyzer::report::{AnchorSeverity, AnchorViolation};
 
@@ -241,12 +213,7 @@ pub fn anchor_finding_to_vulnerability(f: anchor_security_analyzer::report::Anch
     }
 }
 
-// ─── TaintFlow → VulnerabilityFinding ────────────────────────────────────────
-
-/// Convert a taint-analyzer TaintFlow into the standard VulnerabilityFinding format.
-///
-/// Taint flows track untrusted data from sources (instruction input, unchecked
-/// accounts) to security-sensitive sinks (transfers, CPI, state writes).
+/// Maps a taint-analyzer flow to VulnerabilityFinding.
 pub fn taint_flow_to_vulnerability(flow: taint_analyzer::TaintFlow) -> VulnerabilityFinding {
     let (severity, severity_label) = match flow.severity {
         taint_analyzer::TaintSeverity::Critical => (5, "Critical".to_string()),
@@ -255,12 +222,12 @@ pub fn taint_flow_to_vulnerability(flow: taint_analyzer::TaintFlow) -> Vulnerabi
         taint_analyzer::TaintSeverity::Low      => (2, "Low".to_string()),
     };
 
-    let path_str = flow.path.join(" → ");
+    let path_str = flow.path.join(" -> ");
     let location = flow.path.first().cloned().unwrap_or_default();
 
     VulnerabilityFinding {
         category: "Taint Analysis".to_string(),
-        vuln_type: format!("Tainted Data Flow: {:?} → {:?}", flow.source, flow.sink),
+        vuln_type: format!("Tainted Data Flow: {:?} -> {:?}", flow.source, flow.sink),
         severity,
         severity_label,
         id: "SOL-092".to_string(),

@@ -1,8 +1,6 @@
-//! # End-to-End Integration Tests
-//!
-//! Tests the complete scanning pipeline against synthetic programs with
-//! known vulnerabilities (recall tests) and known-safe programs (FP tests).
-//! These catch regressions that unit tests cannot.
+//! End-to-end integration tests for the scanning pipeline.
+//! Tests recall (known vulns detected), false positives (safe code not flagged),
+//! and pipeline integrity (no crashes on edge cases).
 
 #[cfg(test)]
 mod e2e_tests {
@@ -28,9 +26,7 @@ mod e2e_tests {
         findings.iter().any(|f| f.category.contains(cat) || f.vuln_type.contains(cat))
     }
 
-    // ═══════════════════════════════════════════════════════════════════
-    //  RECALL TESTS: Known-vulnerable programs → scanner MUST detect
-    // ═══════════════════════════════════════════════════════════════════
+    // -- Recall tests: known-vulnerable programs must be detected --
 
     #[test]
     fn recall_missing_signer_check() {
@@ -163,9 +159,7 @@ mod e2e_tests {
         assert!(has_remaining, "RECALL FAIL: unchecked remaining_accounts undetected");
     }
 
-    // ═══════════════════════════════════════════════════════════════════
-    //  FALSE POSITIVE TESTS: Known-safe → scanner should NOT flag
-    // ═══════════════════════════════════════════════════════════════════
+    // -- False positive tests: safe code should not be flagged --
 
     #[test]
     fn fp_safe_checked_arithmetic() {
@@ -194,9 +188,7 @@ mod e2e_tests {
             "FP FAIL: checked arithmetic flagged as high/critical overflow");
     }
 
-    // ═══════════════════════════════════════════════════════════════════
-    //  PIPELINE INTEGRITY: Full pipeline doesn't crash on edge cases
-    // ═══════════════════════════════════════════════════════════════════
+    // -- Pipeline integrity: edge cases should not crash --
 
     #[test]
     fn pipeline_empty_program_no_crash() {
@@ -237,9 +229,7 @@ mod e2e_tests {
         assert!(findings.len() >= 5, "50-function program should produce findings");
     }
 
-    // ═══════════════════════════════════════════════════════════════════
-    //  DEDUP & CONFIDENCE INTEGRITY
-    // ═══════════════════════════════════════════════════════════════════
+    // -- Dedup and confidence integrity --
 
     #[test]
     fn dedup_no_identical_findings() {
@@ -294,9 +284,7 @@ mod e2e_tests {
         }
     }
 
-    // ═══════════════════════════════════════════════════════════════════
-    //  REGRESSION: Real program patterns
-    // ═══════════════════════════════════════════════════════════════════
+    // -- Regression tests for real program patterns --
 
     #[test]
     fn regression_marinade_defense_not_flagged_as_attack() {

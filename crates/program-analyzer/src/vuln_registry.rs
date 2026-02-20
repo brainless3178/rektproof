@@ -1,20 +1,5 @@
-//! # Vulnerability ID Registry
-//!
-//! Central registry mapping every SOL-xxx vulnerability ID to its metadata.
-//! Prevents ID collisions, documents ownership, and provides a single source
-//! of truth for all detection categories.
-//!
-//! # ID Scheme
-//!
-//! | Range        | Owner                     | Description                          |
-//! |-------------|---------------------------|--------------------------------------|
-//! | SOL-001–069 | vulnerability_db          | Core pattern-based detectors         |
-//! | SOL-070–079 | sec3-analyzer             | Soteria-style checks                 |
-//! | SOL-080–089 | anchor-security-analyzer  | Anchor-specific constraints          |
-//! | SOL-090–096 | Experimental phases 9–15  | Dataflow, taint, geiger, concolic    |
-//! | SOL-ALIAS-* | account_aliasing          | Account aliasing/confusion           |
-//! | SOL-FV-01–04| FV layer verifiers        | Formal verification (Z3-backed)      |
-//! | SOL-SYM-01  | symbolic-engine           | Symbolic execution proofs            |
+//! Maps every SOL-xxx vulnerability ID to its metadata (owner, CWE, severity).
+//! Prevents ID collisions across analysis phases.
 
 use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
@@ -56,7 +41,7 @@ impl VulnRegistry {
             });
         };
 
-        // ═══ Core pattern detectors (SOL-001 – SOL-069) ═══
+        // Core pattern detectors (SOL-001 - SOL-069)
         add("SOL-001", "Missing Signer Validation", "vulnerability_db", Some("CWE-284"), 5,
             "Transaction proceeds without verifying the required signer.");
         add("SOL-002", "Missing Authority Check", "vulnerability_db", Some("CWE-285"), 5,
@@ -72,7 +57,7 @@ impl VulnRegistry {
         add("SOL-063", "Unvalidated remaining_accounts", "vulnerability_db", Some("CWE-20"), 4,
             "ctx.remaining_accounts is iterated without key/owner validation.");
 
-        // ═══ Sec3 detectors (SOL-070 – SOL-079) ═══
+        // Sec3 detectors (SOL-070 - SOL-079)
         add("SOL-070", "Close Account Drain", "sec3-analyzer", Some("CWE-404"), 4,
             "Account can be closed without properly draining lamports.");
         add("SOL-071", "Duplicate Mutable Accounts", "sec3-analyzer", Some("CWE-362"), 4,
@@ -92,7 +77,7 @@ impl VulnRegistry {
         add("SOL-078", "Missing Rent Exemption Check", "sec3-analyzer", Some("CWE-400"), 2,
             "Account may not be rent-exempt.");
 
-        // ═══ Anchor detectors (SOL-080 – SOL-089) ═══
+        // Anchor detectors (SOL-080 - SOL-089)
         add("SOL-080", "Weak Account Constraint", "anchor-security-analyzer", Some("CWE-285"), 3,
             "Anchor account constraint is too permissive.");
         add("SOL-081", "Invalid Token-2022 Transfer Hook", "anchor-security-analyzer", Some("CWE-691"), 4,
@@ -110,7 +95,7 @@ impl VulnRegistry {
         add("SOL-087", "Unchecked Account Type", "anchor-security-analyzer", Some("CWE-843"), 3,
             "Account type not verified in Anchor context.");
 
-        // ═══ Experimental phase detectors (SOL-090 – SOL-096) ═══
+        // Experimental phase detectors (SOL-090 - SOL-096)
         add("SOL-090", "Uninitialized Variable Use", "dataflow-analyzer", Some("CWE-457"), 3,
             "Variable may be used before initialization.");
         add("SOL-091", "Dead Store / Unused Assignment", "dataflow-analyzer", Some("CWE-563"), 1,
@@ -126,13 +111,13 @@ impl VulnRegistry {
         add("SOL-096", "Concolic Path Vulnerability", "concolic-executor", Some("CWE-119"), 4,
             "Concolic execution found an exploitable path.");
 
-        // ═══ Account aliasing detectors ═══
+        // Account aliasing detectors
         add("SOL-ALIAS-02", "Raw AccountInfo Usage", "account_aliasing", Some("CWE-843"), 3,
             "Raw AccountInfo used without typed wrapper.");
         add("SOL-ALIAS-05", "Authority Without Signer", "account_aliasing", Some("CWE-285"), 4,
             "Authority account not marked as Signer.");
 
-        // ═══ Formal verification detectors (SOL-FV-*) ═══
+        // Formal verification detectors (SOL-FV-*)
         add("SOL-FV-01", "FV: Arithmetic Property Failure", "fv-layer1-verifier", Some("CWE-682"), 4,
             "Kani/deductive analysis found arithmetic safety issue.");
         add("SOL-FV-02", "FV: Z3 Arithmetic Overflow Proof", "fv-layer2-verifier", Some("CWE-190"), 4,

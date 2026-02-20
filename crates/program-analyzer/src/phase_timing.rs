@@ -1,18 +1,4 @@
-//! # Phase Timing Infrastructure
-//!
 //! Records execution time and finding counts for each scanning phase.
-//! Enables performance analysis, bottleneck detection, and per-phase
-//! value assessment (findings-per-second metric).
-//!
-//! # Usage
-//!
-//! ```ignore
-//! let mut timer = PhaseTimer::new();
-//! timer.start("Pattern scanner");
-//! // ... run phase ...
-//! timer.stop("Pattern scanner", finding_count);
-//! println!("{}", timer.report());
-//! ```
 
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
@@ -138,7 +124,7 @@ impl PhaseTimer {
         output.push_str("├──────────────────────────────────────────┼──────────┼──────────┼────────┤\n");
 
         for phase in &report.phases {
-            let status = if phase.errors.is_empty() { "  ✓ " } else { " ⚠️ " };
+            let status = if phase.errors.is_empty() { " ok " } else { "WARN" };
             output.push_str(&format!(
                 "│ {:<40} │ {:>8} │ {:>8} │{status}│\n",
                 truncate_str(&phase.name, 40),
@@ -164,7 +150,7 @@ impl PhaseTimer {
         // Show errors
         for phase in &report.phases {
             for err in &phase.errors {
-                output.push_str(&format!("  ⚠️  {}: {}\n", phase.name, err));
+                output.push_str(&format!("  WARN: {}: {}\n", phase.name, err));
             }
         }
 

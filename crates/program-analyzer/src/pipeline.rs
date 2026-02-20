@@ -1,24 +1,9 @@
-//! # Post-Processing Pipeline
-//!
-//! After all 20 scanning phases produce raw findings, this module handles:
-//!
-//! 1. **Enrichment** — Augments findings with attack scenarios and defenses
-//!    from the account-security-expert and defi-security-expert knowledge bases.
-//!
-//! 2. **Deduplication** — When multiple phases find the same vulnerability,
-//!    keeps only the highest-confidence version (keyed by vuln_type + location + line).
-//!
-//! These steps run BEFORE the validation pipeline (`finding_validator`), which
-//! handles FP filtering and confidence scoring.
+//! Finding enrichment (attack scenarios, defenses) and cross-phase deduplication.
+//! Runs after all scanning phases, before the validation pipeline.
 
 use crate::VulnerabilityFinding;
 
-/// Enrich findings with attack scenarios and prevention patterns from
-/// the expert knowledge systems.
-///
-/// Populates empty `prevention` and `attack_scenario` fields using:
-/// - `account_security_expert::AccountSecurityExpert::get_insight_for_id()`
-/// - `defi_security_expert::DeFiSecurityExpert::get_defense_for_id()`
+/// Populate empty `prevention` and `attack_scenario` fields from expert systems.
 pub fn enrich_findings(findings: &mut Vec<VulnerabilityFinding>) {
     for f in findings.iter_mut() {
         // Account security enrichment
@@ -39,17 +24,7 @@ pub fn enrich_findings(findings: &mut Vec<VulnerabilityFinding>) {
     }
 }
 
-/// Deduplicate findings across phases. When multiple phases detect the same
-/// vulnerability at the same location, keeps only the highest-confidence version.
-///
-/// Dedup key: `(vuln_type, location, line_number)` for located findings,
-/// or `(vuln_type, location, function_name)` for findings without line numbers.
-///
-/// # Algorithm
-///
-/// 1. For each finding, compute a dedup key from (vuln_type, location, line/func).
-/// 2. Track the best (highest confidence) index for each key.
-/// 3. Retain only the winning findings.
+/// Keep only the highest-confidence finding per (vuln_type, location, line).
 pub fn dedup_findings(findings: &mut Vec<VulnerabilityFinding>) {
     use std::collections::{HashMap, HashSet};
     let mut best: HashMap<String, usize> = HashMap::new();
@@ -76,10 +51,7 @@ pub fn dedup_findings(findings: &mut Vec<VulnerabilityFinding>) {
     });
 }
 
-/// Run the full post-processing pipeline: enrich → dedup.
-///
-/// This is called at the end of `scan_for_vulnerabilities_raw()` before
-/// returning findings to the caller.
+/// Enrich then dedup. Called at the end of `scan_for_vulnerabilities_raw`.
 pub fn post_process(findings: &mut Vec<VulnerabilityFinding>) {
     enrich_findings(findings);
     dedup_findings(findings);
