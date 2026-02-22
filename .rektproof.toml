@@ -1,0 +1,23 @@
+# rektproof Configuration
+# Place this file in your project root as `.rektproof.toml`
+
+[scan]
+min_severity = "low"          # "low", "medium", "high", "critical"
+format = "dashboard"          # "json", "sarif", "markdown", "human", "dashboard"
+fail_on = "high"              # Exit non-zero if findings at this level
+exclude_tests = true          # Skip test code
+max_findings = 0              # 0 = unlimited
+
+[engines]
+pattern_scanner = true        # 72 heuristic vulnerability patterns
+deep_ast = true               # syn::visit line-level detection
+taint_analysis = true         # Lattice-based information flow
+cfg_analysis = true           # Dominator-based property verification
+abstract_interp = true        # Interval arithmetic with widening/narrowing
+z3_verification = true        # Z3 BV64 formal verification (requires Z3)
+account_aliasing = true       # Must-not-alias analysis
+
+[ignore]
+ids = []                      # Finding IDs to suppress, e.g. ["SOL-091"]
+paths = ["tests/", "scripts/", "migrations/"]
+functions = []                # Function patterns to skip, e.g. ["test_*"]

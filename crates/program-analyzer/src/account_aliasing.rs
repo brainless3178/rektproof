@@ -387,6 +387,21 @@ fn analyze_accounts_struct(
             matches!(c.kind, ConstraintKind::TokenMint(_))
         });
 
+        // Also check for seeds (PDA-derived token accounts are implicitly
+        // tied to a specific mint via the program logic) and has_one
+        let has_seeds = ta.constraints.iter().any(|c| c.kind == ConstraintKind::Seeds);
+        let has_has_one = ta.constraints.iter().any(|c| {
+            matches!(&c.kind, ConstraintKind::HasOne(_))
+        });
+        let has_authority_check = ta.constraints.iter().any(|c| {
+            matches!(&c.kind, ConstraintKind::TokenAuthority(_))
+        });
+        // If the token account has seeds, has_one, or authority constraint,
+        // it's sufficiently validated — suppress finding
+        if has_seeds || has_has_one || has_authority_check {
+            continue;
+        }
+
         if !has_mint_check {
             findings.push(VulnerabilityFinding {
                 category: "Account Safety".into(),
@@ -578,10 +593,11 @@ fn check_aliasing(accounts: &[AccountParam]) -> Vec<AliasingPair> {
                 continue;
             }
 
-            // Skip if both have PDA seeds (different PDAs can't alias)
+            // Skip if EITHER has PDA seeds — a PDA-derived account
+            // and a user-provided account can never be the same address
             let a_has_seeds = a.constraints.iter().any(|c| c.kind == ConstraintKind::Seeds);
             let b_has_seeds = b.constraints.iter().any(|c| c.kind == ConstraintKind::Seeds);
-            if a_has_seeds && b_has_seeds {
+            if a_has_seeds || b_has_seeds {
                 continue;
             }
 

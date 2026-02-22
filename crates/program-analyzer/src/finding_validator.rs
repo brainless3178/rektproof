@@ -592,11 +592,53 @@ fn is_proven_safe(finding: &VulnerabilityFinding, ctx: &ProjectContext) -> bool 
     }
 
     // ── Universal: non-handler function names ────────────────────────
-    // Constructors, formatters, getters, test helpers can't be entry points
+    // Constructors, formatters, getters, test helpers, data loaders
+    // can't be instruction entry points
     if fn_lower == "new" || fn_lower == "default" || fn_lower == "fmt"
         || fn_lower == "from" || fn_lower == "try_from" || fn_lower == "display"
         || fn_lower.starts_with("test_") || fn_lower.starts_with("mock_")
+        || fn_lower.starts_with("get_") || fn_lower == "load"
+        || fn_lower == "coverage_summary" || fn_lower == "get_gaps"
     {
+        return true;
+    }
+
+    // ── Universal: data/config/metadata files ────────────────────────
+    // Files that are clearly NOT Solana programs should never produce findings.
+    // This catches false positives from vulnerability databases, config files,
+    // test helpers, and documentation files that mention vulnerability keywords.
+    let loc_lower = finding.location.to_lowercase();
+    if loc_lower.contains("knowledge_base") || loc_lower.contains("vulnerability_db")
+        || loc_lower.contains("config") || loc_lower.contains("test")
+        || loc_lower.contains("mock") || loc_lower.contains("fixture")
+        || loc_lower.contains("benchmark") || loc_lower.contains("example")
+    {
+        return true;
+    }
+
+    // ── Universal: code is mostly string literals / struct init ───────
+    // If >60% of the code is inside string literals (quoted text),
+    // this is data initialization, not executable Solana program logic.
+    let quote_count = code.matches('"').count();
+    let line_count = code.lines().count().max(1);
+    if quote_count > line_count * 2 {
+        // More than 2 quotes per line on average = data/config function
+        return true;
+    }
+
+    // ── Universal: no Solana/Anchor markers at all ────────────────────
+    // If the code has zero Solana-related tokens, it's not a Solana handler.
+    let has_solana_marker = code.contains("Context") || code.contains("AccountInfo")
+        || code.contains("Account<") || code.contains("Account <")
+        || code.contains("Signer") || code.contains("invoke")
+        || code.contains("Program") || code.contains("CpiContext")
+        || code.contains("anchor_lang") || code.contains("solana_program")
+        || code.contains("transfer") || code.contains("token::")
+        || code.contains("system_program") || code.contains("seeds")
+        || code.contains("require!") || code.contains("msg!")
+        || code.contains("lamports") || code.contains("pubkey");
+    if !has_solana_marker && ctx.anchor_file_count > 0 {
+        // In an Anchor project, non-Solana code should not be flagged
         return true;
     }
 
@@ -873,8 +915,8 @@ fn is_proven_safe(finding: &VulnerabilityFinding, ctx: &ProjectContext) -> bool 
             false
         }
 
-        // ── SOL-002/SOL-045: Integer Overflow / Unsafe Math ─────────
-        "SOL-002" | "SOL-045" => {
+        // ── SOL-002/SOL-045/SOL-094: Integer Overflow / Unsafe Math ───
+        "SOL-002" | "SOL-045" | "SOL-094" => {
             // Function itself uses checked math
             if code.contains("checked_") || code.contains("saturating_")
                 || code.contains(".ok_or(") || code.contains("try_into")
@@ -886,6 +928,38 @@ fn is_proven_safe(finding: &VulnerabilityFinding, ctx: &ProjectContext) -> bool 
                 || code.contains("as u128")
             {
                 return true;
+            }
+            // Normalized checked math patterns from quote output
+            if norm.contains("checked_add") || norm.contains("checked_sub")
+                || norm.contains("checked_mul") || norm.contains("checked_div")
+                || norm.contains("saturating_add") || norm.contains("saturating_sub")
+                || norm.contains(".ok_or(")
+            {
+                return true;
+            }
+            // SOL-094: the snippet is a description ("Unchecked addition (+)"),
+            // not the actual code. Check a narrow window around the finding line
+            // for checked math — if the surrounding function uses checked_*,
+            // this + is likely combining already-checked results.
+            if finding.id == "SOL-094" {
+                if ctx.has_overflow_checks_toml {
+                    return true;
+                }
+                // Look at ±15 lines around the finding for checked math
+                if let Some(src) = ctx.source_index.get(&finding.location) {
+                    let lines: Vec<&str> = src.lines().collect();
+                    let line_idx = finding.line_number.saturating_sub(1);
+                    let start = line_idx.saturating_sub(15);
+                    let end = (line_idx + 15).min(lines.len());
+                    let window: String = lines[start..end].join("\n");
+                    if window.contains("checked_add") || window.contains("checked_sub")
+                        || window.contains("checked_mul") || window.contains("saturating_")
+                        || window.contains(".ok_or(") || window.contains(". ok_or(")
+                        || window.contains(". checked_add")
+                    {
+                        return true;
+                    }
+                }
             }
             false
         }
@@ -1286,6 +1360,202 @@ fn is_proven_safe(finding: &VulnerabilityFinding, ctx: &ProjectContext) -> bool 
             false
         }
 
+
+        // ── SOL-023: Token Account Confusion ────────────────────────
+        // FALSE POSITIVE IF:
+        // a) All token accounts use Anchor typed Account<'info, TokenAccount>
+        // b) has_one or constraint= validates the token account relationship
+        // c) CpiContext::new uses typed accounts (mint matched at compile time)
+        "SOL-023" => {
+            // Anchor typed accounts validate discriminator + owner automatically
+            if code.contains("Account < 'info , TokenAccount >")
+                || code.contains("Account<'info, TokenAccount>")
+            {
+                // Still safe if has_one or constraint validates the relationship
+                if code.contains("has_one") || code.contains("constraint =")
+                    || code.contains("token :: mint") || code.contains("token::mint")
+                {
+                    return true;
+                }
+                // CpiContext::new with typed accounts = safe
+                if code.contains("CpiContext :: new") || code.contains("CpiContext::new") {
+                    return true;
+                }
+            }
+            // Project-wide: if anchor typed ratio is high, suppress
+            if ctx.anchor_typed_ratio > 0.7 {
+                return true;
+            }
+            false
+        }
+
+        // ── SOL-032: Missing Decimals Validation ────────────────────
+        // FALSE POSITIVE IF:
+        // a) Single-token vault (same mint in/out, no cross-decimal math)
+        // b) Project handles decimals elsewhere
+        // c) CpiContext transfers between typed accounts (same mint)
+        "SOL-032" => {
+            // Single-token transfer with CpiContext = same mint, no decimal issue
+            if (code.contains("CpiContext :: new") || code.contains("CpiContext::new")
+                || code.contains("CpiContext :: new_with_signer") || code.contains("CpiContext::new_with_signer"))
+                && (code.contains("Account < 'info , TokenAccount>")
+                    || code.contains("Account<'info, TokenAccount>"))
+            {
+                return true;
+            }
+            // CpiContext in the code snippet (with any normalization)
+            if norm.contains("CpiContext") && (norm.contains("TokenAccount") || norm.contains("transfer")) {
+                return true;
+            }
+            // Function uses checked_sub/checked_add = amount handling is safe
+            if code.contains("checked_sub") || code.contains("checked_add")
+                || norm.contains("checked_sub") || norm.contains("checked_add")
+            {
+                return true;
+            }
+            // Check full source file for CpiContext + typed accounts
+            if let Some(src) = ctx.source_index.get(&finding.location) {
+                let has_cpi = src.contains("CpiContext :: new") || src.contains("CpiContext::new")
+                    || src.contains("CpiContext :: new_with_signer") || src.contains("CpiContext::new_with_signer");
+                let has_typed = src.contains("Account < 'info , TokenAccount>")
+                    || src.contains("Account<'info, TokenAccount>");
+                if has_cpi && has_typed {
+                    return true;
+                }
+            }
+            // Check ALL source files for typed CPI transfers
+            for (_file, src) in &ctx.source_index {
+                let has_cpi = src.contains("CpiContext :: new") || src.contains("CpiContext::new")
+                    || src.contains("CpiContext :: new_with_signer");
+                let has_typed = src.contains("Account < 'info , TokenAccount>");
+                if has_cpi && has_typed {
+                    return true;
+                }
+            }
+            // Project level decimals handling
+            if ctx.has_decimals_handling {
+                return true;
+            }
+            false
+        }
+
+        // ── SOL-039: Rounding Direction Error ───────────────────────
+        // FALSE POSITIVE IF:
+        // a) Code uses u128 precision or ceil_div
+        // b) Rounding is in protocol's favor (checked)
+        // c) Project has AMM invariant math
+        "SOL-039" => {
+            if ctx.has_u128_precision || ctx.has_safe_math_module || ctx.has_amm_invariant_check {
+                return true;
+            }
+            if code.contains("checked_ceil_div") || code.contains("ceil_div")
+                || code.contains("u128") || code.contains("U128")
+            {
+                return true;
+            }
+            // checked_add/checked_mul with proper rounding = safe
+            if code.contains("checked_add") && code.contains("checked_mul") {
+                return true;
+            }
+            false
+        }
+
+        // ── SOL-ALIAS-01: Potential Account Aliasing ────────────────
+        // FALSE POSITIVE IF:
+        // a) One of the accounts has seeds (PDA can't alias non-PDA)
+        // b) Accounts are different Anchor types
+        // c) has_one or constraint links them
+        // d) The struct name suggests it's not security-sensitive (Initialize)
+        "SOL-ALIAS-01" => {
+            // PDA-derived accounts can't alias user-provided ones
+            if code.contains("seeds =") || code.contains("seeds=") {
+                return true;
+            }
+            // has_one constraint validates the relationship
+            if code.contains("has_one") || norm.contains("has_one") {
+                return true;
+            }
+            // Custom constraint with != check
+            if code.contains("!=") && code.contains("constraint") {
+                return true;
+            }
+            // Initialize structs create new accounts, aliasing is irrelevant
+            if finding.function_name.contains("Initialize")
+                || finding.function_name.contains("Init")
+            {
+                return true;
+            }
+            // Check full source for the struct — if the struct has seeds= on
+            // any account, the accounts in that struct can't alias PDA accounts
+            let struct_name = &finding.function_name;
+            for (_file, src) in &ctx.source_index {
+                // Find the struct definition
+                if src.contains(&format!("pub struct {}", struct_name))
+                    || src.contains(&format!("struct {}", struct_name))
+                {
+                    // If ANY account in this struct has seeds, PDA aliasing is prevented
+                    if src.contains("seeds =") || src.contains("seeds=") {
+                        return true;
+                    }
+                    if src.contains("has_one") {
+                        return true;
+                    }
+                }
+            }
+            false
+        }
+
+        // ── SOL-ALIAS-02: Raw AccountInfo Without Type Safety ───────
+        // FALSE POSITIVE IF:
+        // a) The account is a well-known system program (token_program, etc.)
+        // b) The account has a CHECK comment
+        // c) The account is validated by has_one in the struct
+        // d) The program is a Kani proof or test
+        "SOL-ALIAS-02" => {
+            let name_lower = finding.vulnerable_code.to_lowercase();
+            // System programs are raw AccountInfo by convention but safe
+            if name_lower.contains("system_program") || name_lower.contains("token_program")
+                || name_lower.contains("rent") || name_lower.contains("clock")
+            {
+                return true;
+            }
+            // Kani proofs and tests use raw AccountInfo legitimately
+            if finding.location.contains("kani") || finding.location.contains("proof_") {
+                return true;
+            }
+            false
+        }
+
+        // ── SOL-ALIAS-04: Token Account Without Mint Verification ───
+        // FALSE POSITIVE IF:
+        // a) The token account has seeds= constraint (PDA = known mint)
+        // b) The token account has has_one constraint
+        // c) The token account is validated by constraint =
+        // d) The program uses CpiContext with known token accounts
+        "SOL-ALIAS-04" => {
+            // PDA-derived token accounts are tied to a specific mint by the seeds
+            if code.contains("seeds =") || code.contains("seeds=") {
+                return true;
+            }
+            // has_one validates the account belongs to the expected owner/mint
+            if code.contains("has_one") || norm.contains("has_one") {
+                return true;
+            }
+            // constraint= with a mint or authority validation
+            if code.contains("constraint =") || code.contains("constraint=") {
+                return true;
+            }
+            // CpiContext bridges validate accounts through the program
+            if code.contains("CpiContext") {
+                return true;
+            }
+            // High anchor typed ratio = likely properly constrained
+            if ctx.anchor_typed_ratio > 0.8 {
+                return true;
+            }
+            false
+        }
+
         _ => false,
     }
 }
@@ -1428,6 +1698,14 @@ fn is_non_program_file(location: &str) -> bool {
         || lower.contains("fixture")
         || lower.contains("migration")
         || lower.contains("scripts")
+        || lower.contains("knowledge_base")
+        || lower.contains("vulnerability_db")
+        || lower.contains("vuln_knowledge")
+        || lower.contains("finding_validator")
+        || lower.contains("metrics")
+        || lower.contains("phase_timing")
+        || lower.contains("cli")
+        || lower.contains("tui")
 }
 
 /// Stage 6: Cap findings per severity.

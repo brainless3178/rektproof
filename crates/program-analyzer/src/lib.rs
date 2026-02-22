@@ -44,6 +44,11 @@ fn normalize_quote_output(code: &str) -> String {
         .replace("CpiContext < ", "CpiContext<")
         .replace("'info >", "'info>")
         .replace("'info , ", "'info, ")
+        .replace("TokenAccount >", "TokenAccount>")
+        .replace("Token >", "Token>")
+        .replace("Mint >", "Mint>")
+        .replace("Vault >", "Vault>")
+        .replace("System >", "System>")
         .replace("(signer )", "(signer)")
         .replace("(mut )", "(mut)")
         .replace("(mut , ", "(mut, ")
@@ -67,6 +72,9 @@ pub mod defi_detector;
 pub mod taint_lattice;
 pub mod cfg_analyzer;
 pub mod abstract_interp;
+pub mod ast_to_z3;
+pub mod rektproof_config;
+pub mod vuln_knowledge_base;
 pub mod account_aliasing;
 
 pub mod phase_timing;
@@ -214,10 +222,37 @@ impl ProgramAnalyzer {
         }
 
         // Phase 3: Lattice-based taint analysis (information flow)
+        // 3a: Intraprocedural analysis — per-function worklist iteration
         for (filename, source) in &self.raw_sources {
             let taint_results = taint_lattice::analyze_taint(source, filename);
             for result in taint_results {
                 findings.extend(result.findings);
+            }
+        }
+        // 3b: Interprocedural analysis — cross-file call graph + taint summaries
+        //     Merge call graphs from ALL files to detect cross-file taint flows
+        {
+            let mut all_edges = Vec::new();
+            let mut all_summaries = Vec::new();
+            for (_filename, source) in &self.raw_sources {
+                let (edges, summaries) = taint_lattice::build_call_graph(source);
+                all_edges.extend(edges);
+                all_summaries.extend(summaries);
+            }
+            if !all_edges.is_empty() {
+                for (filename, source) in &self.raw_sources {
+                    let mut intra_results = taint_lattice::analyze_taint(source, filename);
+                    taint_lattice::apply_interprocedural_summaries(
+                        &mut intra_results, &all_edges, &all_summaries, filename,
+                    );
+                    for result in intra_results {
+                        for f in result.findings {
+                            if f.id.contains("IP") {
+                                findings.push(f);
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -233,6 +268,14 @@ impl ProgramAnalyzer {
         for (filename, source) in &self.raw_sources {
             let interval_findings = abstract_interp::analyze_intervals(source, filename);
             findings.extend(interval_findings);
+        }
+
+        // Phase 5b: Z3-backed formal verification (BV64 constraint solving)
+        //           Generates SMT formulas from syn::Expr AST nodes and uses
+        //           Z3 to prove arithmetic safety or find counterexamples.
+        for (filename, source) in &self.raw_sources {
+            let z3_findings = ast_to_z3::verify_with_z3(source, filename);
+            findings.extend(z3_findings);
         }
 
         // Phase 6: Account aliasing & confusion analysis
@@ -492,7 +535,7 @@ impl ProgramAnalyzer {
                                     function_name: lf.instruction,
                                     line_number: lf.line_number,
                                     vulnerable_code: lf.source_snippet.unwrap_or_default(),
-                                    description: format!("{} [ML reasoning: {}]", lf.description, lf.ml_reasoning),
+                                    description: format!("{} [heuristic reasoning: {}]", lf.description, lf.ml_reasoning),
                                     attack_scenario: String::new(),
                                     real_world_incident: None,
                                     secure_fix: lf.fix_recommendation,

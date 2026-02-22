@@ -7,19 +7,20 @@
     <a href="#features">Features</a> •
     <a href="#quick-start">Quick Start</a> •
     <a href="#architecture">Architecture</a> •
-    <a href="#live-results">Live Results</a> •
+    <a href="#honest-capabilities">Honest Capabilities</a> •
     <a href="#contributing">Contributing</a>
   </p>
 </p>
+
+[![CI](https://github.com/brainless3178/rektproof/actions/workflows/ci.yml/badge.svg)](https://github.com/brainless3178/rektproof/actions/workflows/ci.yml)
 
 ---
 
 ## What is rektproof?
 
-**rektproof** is a multi-engine security scanner for Solana programs that combines
-15 analysis phases — from pattern matching to abstract interpretation to concolic
-execution — into a single CLI tool. It's built for auditors who need **trustworthy
-findings, not noise**.
+**rektproof** is a multi-technique security scanner for Solana programs. It applies
+6 distinct analysis techniques through 20 scanning phases — from pattern matching
+to abstract interpretation — via a single CLI tool.
 
 ```
 $ rektproof scan ./programs/my-protocol --format json
@@ -28,9 +29,8 @@ $ rektproof scan ./programs/my-protocol --format json
   │       87/100      │
   ╰───────────────────╯
 
-  ✓ 15 analysis engines completed in 0.8s
+  ✓ 20 scanning phases completed in 0.8s
   ✓ 3 findings survived validation (from 47 raw detections)
-  ✓ 0 false positives (enterprise-grade filtering)
 ```
 
 ### Why rektproof?
@@ -47,25 +47,20 @@ $ rektproof scan ./programs/my-protocol --format json
 
 ## Features
 
-### 🔬 15 Analysis Engines
+### 🔬 6 Analysis Techniques, 20 Scanning Phases
 
-| Phase | Engine | What it finds |
-|-------|--------|---------------|
-| 1 | **Pattern Scanner** | 72 vulnerability patterns (SOL-001 to SOL-073) |
-| 2 | **Deep AST Scanner** | Line-level detection via `syn::visit` |
-| 3 | **Taint Lattice** | Information flow from untrusted sources to sinks |
-| 4 | **CFG Analyzer** | Dominator-based property verification |
-| 5 | **Abstract Interp** | Interval arithmetic, overflow proofs |
-| 6 | **Account Aliasing** | Must-not-alias analysis, authority spoofing |
-| 7 | **Sec3 (Soteria)** | PDA security, duplicate accounts, close accounts |
-| 8 | **Anchor Security** | Constraint validation, Token-2022 hooks, bump checks |
-| 9 | **Dataflow** | Reaching definitions, uninitialized uses |
-| 10 | **Taint Analyzer** | Context-sensitive source-to-sink tracking |
-| 11 | **Geiger** | Unsafe code analysis |
-| 12 | **Arithmetic Expert** | Overflow, precision loss, rounding errors |
-| 13 | **L3X Heuristic** | ML-inspired pattern detection |
-| 14 | **Invariant Miner** | Discovers and verifies program invariants |
-| 15 | **Concolic Executor** | Symbolic + concrete execution hybrid |
+| Technique | Phases | What it finds |
+|-----------|--------|---------------|
+| **Pattern Matching** | 1, 7-8, 11-13 | 72 vulnerability patterns (SOL-001 to SOL-073), Anchor constraints, Sec3, unsafe code, arithmetic issues |
+| **Deep AST Analysis** | 2, 9 | Line-level detection via `syn::visit`, reaching definitions, uninitialized uses |
+| **Taint Analysis** | 3 (intra + interprocedural), 10 | Information flow from untrusted sources to sinks, cross-function taint propagation |
+| **CFG Analysis** | 4 | Dominator-based property verification, reachability without guards |
+| **Abstract Interpretation** | 5 | Interval arithmetic with widening/narrowing at loop heads, overflow proofs, division-by-zero detection |
+| **Account Security** | 6, 14 | Must-not-alias analysis, authority spoofing, invariant mining |
+
+> **Transparency Note:** Phases 15-20 use experimental formal verification crates
+> (Z3, Kani, Certora, Crux-MIR wrappers). These provide heuristic property checking,
+> not fully automated end-to-end formal verification. See [Honest Capabilities](#honest-capabilities).
 
 ### 🛡️ Enterprise Validation Pipeline
 
@@ -85,6 +80,31 @@ Raw findings pass through a 6-stage gauntlet:
 - Identifies fee mismatch vulnerabilities
 - Checks permanent delegate exposure
 
+### 🔬 Abstract Interpretation (Real)
+
+The abstract interpreter operates directly on the `syn::Expr` AST — no string splitting.
+It implements proper widening at loop heads with narrowing for precision recovery:
+
+```
+For a loop body B with entry state S₀:
+  1. Forward pass: S' = S₀ ⊔ ⟦B⟧(S₀)
+  2. Widening: S = S ∇ S'  (forces convergence)
+  3. Repeat until stable
+  4. Narrowing: S = S Δ ⟦B⟧(S)  (recovers precision)
+```
+
+**Soundness guarantee:** The widened state is a post-fixpoint — every concrete
+loop execution stays within the computed intervals.
+
+### 🔗 Interprocedural Taint Analysis
+
+Builds a call graph from the AST and computes per-function taint summaries.
+At call sites, summaries are applied to propagate taint across function boundaries:
+
+- **Param → Return tracking**: Knows which parameters influence return values
+- **Param → Sink tracking**: Knows which parameters reach security sinks in callees
+- **Cross-function findings**: Flags when tainted data flows through helper functions to privileged operations
+
 ### 🔗 Formal Verification (Experimental)
 
 ```
@@ -95,6 +115,33 @@ $ rektproof verify-formal ./programs/my-protocol
   Layer 3: Z3 Verification ...... 11/12 proved safe
   Layer 4: Counterexamples ...... 1 potential violation
 ```
+
+---
+
+## Honest Capabilities
+
+### What Works Well ✅
+
+- **Pattern matching**: 72 detectors with field-tested heuristics
+- **Deep AST scanning**: Precise line-level detection using `syn::visit`
+- **Taint analysis**: Lattice-based with worklist fixed-point iteration (intra + interprocedural)
+- **CFG dominators**: Sound property verification on the control flow graph
+- **Abstract interpretation**: AST-based with real widening/narrowing at loop heads
+- **Account aliasing**: Must-not-alias analysis for authority spoofing
+- **Validation pipeline**: 6-stage filtering that significantly reduces false positives
+
+### What's Experimental ⚠️
+
+- **Formal verification (Phases 16-20)**: Z3 constraints are pattern-matched, not generated from program semantics. The "formal" in "formal verification" is aspirational — it provides heuristic property checking, not mathematical proofs.
+- **Concolic execution (Phase 15)**: Pattern-based constraint generation, not actual symbolic execution with concrete seed values.
+- **Kani/Certora/Crux-MIR**: These are thin wrappers that fall back to offline Z3 when the actual tools aren't installed.
+
+### What's Not There Yet ❌
+
+- **LSP integration**: Not implemented
+- **Incremental scanning**: Not implemented
+- **Configuration file**: Not implemented (all config via CLI flags)
+- **Cross-module interprocedural analysis**: Call graph is per-file, not cross-crate
 
 ---
 
@@ -116,47 +163,21 @@ cargo build --release
 ### Usage
 
 ```bash
-# Scan a Solana program
+# Scan a Solana program (interactive dashboard)
 ./target/release/shanon scan ./path/to/program
 
 # JSON output for CI/CD
 ./target/release/shanon scan ./path/to/program --format json
 
-# Formal verification
+# SARIF output for GitHub Security tab
+./target/release/shanon scan ./path/to/program --format sarif
+
+# Markdown audit report
+./target/release/shanon scan ./path/to/program --format markdown
+
+# Formal verification (experimental)
 ./target/release/shanon verify-formal ./path/to/program
 ```
-
-### Example: Scanning Raydium CP Swap
-
-```bash
-$ ./target/release/shanon scan ./raydium-cp-swap/programs/cp-swap
-
-╭ ◉ SECURITY SCORE ╮
-│       92/100      │
-╰───────────────────╯
-
-  1 finding:
-  HIGH  SOL-063  Unvalidated remaining_accounts  (conf: 56%)
-        fn: update_amm_config
-        Fix: Validate each remaining_account's owner, key, signer status.
-```
-
----
-
-## Live Results
-
-Tested against 6 production Solana programs (~150k LoC total):
-
-| Program | Findings | True Positive Rate | Scan Time |
-|---------|----------|-------------------|-----------|
-| Raydium CP Swap | 1 | 100% | 0.3s |
-| Squads v4 Multisig | 5 | ~80% | 0.4s |
-| Marinade Finance | 0 | N/A (clean) | 0.2s |
-| SPL Governance | 3 | ~67% | 0.3s |
-| Orca Whirlpools | 4 | ~75% | 1.2s |
-| Drift Protocol v2 | 5 | ~60% | 2.1s |
-
-**Total: 18 findings across 6 programs** (down from 70 pre-validation).
 
 ---
 
@@ -171,16 +192,17 @@ Tested against 6 production Solana programs (~150k LoC total):
 │              program-analyzer                    │
 │  ┌─────────┐ ┌──────────┐ ┌──────────────────┐  │
 │  │ Engines │ │Validator │ │  Vuln Database   │  │
-│  │ (1-15)  │ │Pipeline  │ │  (72 patterns)   │  │
+│  │ (1-20)  │ │Pipeline  │ │  (72 patterns)   │  │
 │  └────┬────┘ └────┬─────┘ └────────┬─────────┘  │
 │       └───────────┴────────────────┘             │
 ├──────────────────────────────────────────────────┤
-│  Experimental Crates                             │
-│  sec3 · anchor · taint · geiger · l3x · concolic│
-│  invariant-miner · arithmetic · dataflow · cfg   │
-│  account-aliasing · abstract-interp · defi-sec   │
+│  Analysis Sub-engines                            │
+│  taint-lattice · cfg-analyzer · abstract-interp  │
+│  account-aliasing · deep-ast · anchor-security   │
+│  sec3 · geiger · arithmetic · dataflow           │
+│  defi-security · invariant-miner                 │
 ├──────────────────────────────────────────────────┤
-│  FV Scanner (4-layer formal verification)        │
+│  FV Scanner (experimental, Z3-backed)            │
 │  property-extraction → model-gen → z3 → report  │
 └──────────────────────────────────────────────────┘
 ```
@@ -199,19 +221,16 @@ rektproof/
 │       ├── anchor-security-analyzer/
 │       ├── taint-analyzer/
 │       ├── geiger-analyzer/
-│       ├── l3x-analyzer/
-│       ├── concolic-executor/
-│       ├── invariant-miner/
 │       ├── arithmetic-security-expert/
 │       ├── dataflow-analyzer/
-│       ├── cfg-analyzer/
 │       ├── account-security-expert/
 │       ├── defi-security-expert/
 │       ├── fv-scanner-core/
 │       └── ...
 ├── test-live-programs/      # Live program sources for testing
-├── live-audit-results/      # Audit output files
-└── DETECTOR_FIX_REPORT.md   # Detailed fix documentation
+├── .github/workflows/       # CI/CD pipeline
+├── BRUTALLY_HONEST_AUDIT.md # Internal audit findings
+└── PRODUCTION_UPGRADE_PLAN.md
 ```
 
 ---

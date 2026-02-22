@@ -525,4 +525,13 @@ fn test_fully_secure_program_findings_analysis() {
             .map(|f| &f.vuln_type)
             .collect::<Vec<_>>()
     );
+
+    // GOLD STANDARD: A properly secured Anchor program MUST produce ZERO findings.
+    // If this assertion fails, a false positive was introduced — fix it before merging.
+    assert!(
+        findings.is_empty(),
+        "ZERO FALSE POSITIVES required on properly secured code! Got {} findings: {:?}",
+        findings.len(),
+        findings.iter().map(|f| format!("[{}] {}", f.id, f.vuln_type)).collect::<Vec<_>>()
+    );
 }
