@@ -3,7 +3,7 @@
 //! Language Server Protocol implementation that provides real-time
 //! Solana vulnerability highlighting in VS Code (and other editors).
 //!
-//! On `textDocument/didSave`, runs the 52+ detector engine over the
+//! On `textDocument/didSave`, runs the 72+ vulnerability pattern scanner over the
 //! source file and publishes diagnostics with severity, descriptions,
 //! and suggested fixes.
 
@@ -41,7 +41,7 @@ impl LanguageServer for ShanonLspBackend {
 
     async fn initialized(&self, _: InitializedParams) {
         self.client
-            .log_message(MessageType::INFO, "Shanon LSP server initialized — 52+ detectors active")
+            .log_message(MessageType::INFO, "Shanon LSP server initialized — 72+ vulnerability patterns active")
             .await;
     }
 

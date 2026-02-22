@@ -1,3 +1,29 @@
+//! # Crux-MIR Security Analyzer — AST-Based Fallback
+//!
+//! **Honest disclosure:** This crate performs Rust AST-based security analysis
+//! using `syn::visit`, NOT actual Crux-MIR symbolic execution. The `crux-mir`
+//! tool is not invoked. Instead, this performs:
+//!
+//! - Signer validation checking on instruction handlers
+//! - Owner validation checking for raw `AccountInfo` usage
+//! - Unchecked arithmetic detection on sensitive variables
+//!
+//! The analysis walks the parsed Rust AST using the `syn` crate and checks for
+//! common Solana vulnerability patterns. Results are returned in a structured
+//! report format.
+//!
+//! ## What This Is NOT
+//!
+//! - NOT symbolic execution of Rust MIR
+//! - NOT a Crux-MIR integration (crux-mir is never invoked)
+//! - NOT a formal verification backend
+//!
+//! ## What This IS
+//!
+//! A practical AST-based security scanner that catches missing signers,
+//! missing owner checks, and unchecked arithmetic — the same patterns
+//! that `deep_ast_scanner.rs` in `program-analyzer` checks.
+
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -64,10 +90,10 @@ impl CruxMirAnalyzer {
             success: findings.is_empty(),
             findings,
             analyzed_instructions,
-            confidence: 0.99, // Enterprise Grade Logic
-            prover_backend: "Crux-MIR Symbolic Engine".to_string(),
+            confidence: 0.75, // AST pattern matching — good but not symbolic
+            prover_backend: "AST Security Scanner (syn::visit fallback — Crux-MIR not installed)".to_string(),
             timestamp: chrono::Utc::now().to_rfc3339(),
-            exploration_depth: 1024,
+            exploration_depth: analyzed_instructions,
         })
     }
 }
@@ -188,7 +214,7 @@ mod tests {
         if program_path.exists() {
             let report = analyzer.analyze_program(&program_path).await.unwrap();
             assert!(report.analyzed_instructions > 0, "should analyze at least 1 instruction");
-            assert_eq!(report.prover_backend, "Crux-MIR Symbolic Engine");
+            assert_eq!(report.prover_backend, "AST Security Scanner (syn::visit fallback — Crux-MIR not installed)");
             assert!(report.confidence > 0.0);
         }
     }

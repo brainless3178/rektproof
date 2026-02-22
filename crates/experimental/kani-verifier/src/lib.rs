@@ -1,27 +1,32 @@
-//! # Kani Rust Verifier Integration
+//! # Kani-Style Invariant Verification (Z3 Fallback)
 //!
-//! Integrates [Kani](https://model-checking.github.io/kani/), an open-source
-//! bit-precise model checker for Rust built by AWS, into the Solana security
-//! audit pipeline.
+//! This crate extracts program invariants from Solana/Anchor source code and
+//! generates [Kani](https://model-checking.github.io/kani/) proof harnesses.
+//! When `cargo kani` is available, it invokes bounded model checking via CBMC.
 //!
-//! Kani uses CBMC (C Bounded Model Checker) under the hood and encodes Rust
-//! semantics into SAT/SMT queries. This module:
+//! **In practice, `cargo kani` is almost never installed**, so this crate
+//! falls back to verifying extracted invariants with the Z3 SMT solver.
+//! The Z3 fallback provides genuine mathematical proofs for specific
+//! property categories, but operates on pattern-extracted invariants
+//! rather than full program semantics.
 //!
-//! 1. **Extracts** Solana account invariants from Anchor program source code
-//! 2. **Generates** Kani proof harnesses (`#[kani::proof]`) for each invariant
-//! 3. **Invokes** `cargo kani` as a subprocess to run bounded model checking
-//! 4. **Parses** the CBMC verification output into structured results
+//! ## Pipeline
+//!
+//! 1. **Extract** Solana account invariants from Anchor program source code
+//! 2. **Generate** Kani proof harnesses (`#[kani::proof]`) for each invariant
+//! 3. **Attempt** `cargo kani` (usually unavailable → falls back to step 4)
+//! 4. **Z3 fallback**: Encode invariants as SMT formulae and prove/refute
 //!
 //! ## Invariant Categories
 //!
-//! | Category | Examples |
-//! |----------|----------|
-//! | Balance Conservation | `total == sum_of_parts`, no tokens created from nothing |
-//! | Access Control | Only authority can modify state |
-//! | Arithmetic Safety | No overflow/underflow in token math |
-//! | Account Ownership | PDAs owned by correct program |
-//! | State Transition | Valid FSM transitions only |
-//! | Bounds Checking | Values within protocol-defined limits |
+//! | Category | Z3 Encoding |
+//! |----------|-------------|
+//! | Balance Conservation | ∑inputs = ∑outputs (integer arithmetic) |
+//! | Access Control | authority ≠ attacker when signer unchecked (BV256) |
+//! | Arithmetic Safety | BV64 overflow detection |
+//! | Account Ownership | Owner pubkey equality constraints (BV256) |
+//! | State Transition | FSM reachability (integer encoding) |
+//! | Bounds Checking | Value ranges (BV64) |
 
 pub mod harness_generator;
 pub mod invariant_extractor;

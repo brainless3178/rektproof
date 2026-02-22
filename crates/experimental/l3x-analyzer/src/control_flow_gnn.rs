@@ -1,15 +1,16 @@
-//! Control Flow Graph Neural Network
+//! Control Flow Graph Structural Analyzer
 //!
-//! Builds control flow graphs from Rust AST and applies graph neural network
-//! analysis to detect anomalous patterns. This is inspired by research in
-//! "Devign: Effective Vulnerability Identification by Learning Comprehensive
-//! Program Semantics via Graph Neural Networks" (NeurIPS 2019).
+//! Builds control flow graphs from Rust AST and applies structural deviation
+//! analysis to detect anomalous patterns. Despite the module name, this does
+//! NOT implement a Graph Neural Network — it uses deterministic graph analysis:
 //!
-//! The GNN operates on a graph where:
-//! - Nodes = AST elements (statements, expressions, function calls)
-//! - Edges = Control flow (sequential, conditional, loop)
-//! - Node features = Statement type, variable usage, function calls
-//! - Edge features = Control flow type (if/else, loop, call)
+//! 1. Build a CFG from the `syn` AST using `syn::visit`
+//! 2. Compute a feature vector per node (one-hot node type encoding)
+//! 3. Aggregate neighbor features in two message-passing rounds
+//!    (using fixed, non-learned weight matrices with Xavier-like initialization)
+//! 4. Compute mean embedding; flag nodes with high Euclidean deviation
+//!
+//! The weight matrices are deterministic (sin-based initialization), NOT trained.
 
 use crate::report::{DetectionMethod, L3xCategory, L3xFinding, L3xSeverity};
 use petgraph::graph::{DiGraph, NodeIndex};

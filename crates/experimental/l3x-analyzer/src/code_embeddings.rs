@@ -1,13 +1,15 @@
-//! Code Embeddings Module
+//! Weighted Token Scoring Module
 //!
-//! Generates semantic embeddings of Rust code using a simplified transformer-based
-//! approach. In production, this would use a pre-trained model like CodeBERT or
-//! GraphCodeBERT, but here we implement a lightweight embedding system based on:
+//! Scores Rust source code against known vulnerability patterns using a
+//! bag-of-words approach with Solana-specific token weights and cosine
+//! similarity. Despite the module name, this does NOT use transformers,
+//! CodeBERT, or any neural model — it uses deterministic weighted scoring.
 //!
-//! 1. Token-level features (keywords, identifiers, operators)
-//! 2. AST structural features (depth, branching factor)
-//! 3. Semantic features (function calls, account access patterns)
-//! 4. Solana-specific features (CPI calls, PDA derivations, signer checks)
+//! The approach:
+//! 1. Tokenize source code by splitting on non-alphanumeric characters
+//! 2. Weight each token using hand-tuned Solana-specific weights
+//! 3. Build a 128-dimensional vector by distributing weights across bins
+//! 4. Compare against pre-computed vulnerability pattern vectors via cosine similarity
 
 use crate::report::{DetectionMethod, L3xCategory, L3xFinding, L3xSeverity};
 use ndarray::Array1;
@@ -208,9 +210,10 @@ impl CodeEmbedder {
                             pattern_name, similarity * 100.0
                         ),
                         ml_reasoning: format!(
-                            "Transformer-based code embedding generated a {}-dimensional semantic vector \
+                            "Weighted token scoring generated a {}-dimensional feature vector \
                              with cosine similarity of {:.3} to the '{}' vulnerability pattern. \
-                             This indicates the code structure and token usage align with exploitable patterns.",
+                             This indicates the code's token usage aligns with known exploitable patterns. \
+                             (Note: this is deterministic heuristic scoring, not a neural model.)",
                             EMBEDDING_DIM, similarity, pattern_name
                         ),
                         fix_recommendation: self.get_fix_recommendation(&category),

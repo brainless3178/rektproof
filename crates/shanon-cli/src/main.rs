@@ -1,5 +1,6 @@
 mod tui;
 mod dashboard;
+mod commands;
 
 use clap::{Parser, Subcommand};
 use colored::*;
@@ -151,7 +152,7 @@ enum Commands {
         #[arg(long, default_value = "3")]
         iterations: usize,
     },
-    /// Run formal verification pipeline (Kani + Certora + Symbolic Engine + Crux-MIR)
+    /// Run Z3 property checking pipeline (with Kani/Certora harness generation, falls back to Z3)
     VerifyFormal {
         /// Path to program source
         #[arg(long, default_value = ".")]

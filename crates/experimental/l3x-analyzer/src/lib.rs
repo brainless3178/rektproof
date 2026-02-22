@@ -1,17 +1,22 @@
-//! # L3X AI-Driven Static Analyzer for Solana
+//! # L3X Heuristic Code Analyzer for Solana
 //!
-//! L3X uses machine learning and graph neural networks to detect complex
-//! vulnerabilities that traditional static analyzers miss. It combines:
+//! L3X uses weighted-token scoring and control flow graph structural analysis
+//! to detect vulnerability patterns. It combines five heuristic techniques:
 //!
-//! 1. **Code Embeddings** — Transformer-based semantic understanding
-//! 2. **Control Flow GNN** — Graph neural network for dataflow analysis
-//! 3. **Anomaly Detection** — Identifies zero-day vulnerability patterns
-//! 4. **Pattern Learning** — Learns from historical Solana exploits
-//! 5. **Ensemble Scoring** — Combines multiple ML models for high confidence
+//! 1. **Weighted Token Scoring** — Bag-of-words with Solana-specific token weights
+//!    and cosine similarity against known vulnerability signatures
+//! 2. **CFG Structural Analysis** — Builds control flow graphs via `syn::visit`
+//!    and flags nodes with high deviation from the mean embedding (not a trained GNN)
+//! 3. **Statistical Anomaly Detection** — Flags code blocks whose token distribution
+//!    deviates significantly from the project baseline
+//! 4. **Exploit Pattern Matching** — Compares code against signatures derived from
+//!    historical Solana exploits (Wormhole, Cashio, etc.)
+//! 5. **Ensemble Scoring** — Combines scores from the above techniques with
+//!    hand-tuned weights and thresholds
 //!
-//! Unlike rule-based analyzers, L3X can detect novel attack patterns by
-//! understanding the semantic meaning of code and identifying anomalous
-//! control flow structures.
+//! **Transparency note:** Despite sub-module naming (e.g., `code_embeddings`,
+//! `control_flow_gnn`), no machine learning models, neural networks, or trained
+//! parameters are used. All analysis is deterministic heuristic scoring.
 
 pub mod anomaly_detector;
 pub mod code_embeddings;
@@ -33,7 +38,7 @@ use syn::visit::Visit;
 use tracing::{info, warn};
 use walkdir::WalkDir;
 
-/// L3X AI-driven static analyzer configuration
+/// L3X heuristic analyzer configuration
 #[derive(Debug, Clone)]
 pub struct L3xConfig {
     /// Enable code embedding analysis
@@ -66,7 +71,7 @@ impl Default for L3xConfig {
     }
 }
 
-/// L3X AI-driven static analyzer
+/// L3X heuristic code analyzer (weighted token scoring + CFG structural analysis)
 pub struct L3xAnalyzer {
     config: L3xConfig,
     embedder: CodeEmbedder,
@@ -84,7 +89,7 @@ impl L3xAnalyzer {
 
     /// Create a new L3X analyzer with custom configuration
     pub fn with_config(config: L3xConfig) -> Self {
-        info!("Initializing L3X AI-driven analyzer with ML models...");
+        info!("Initializing L3X heuristic analyzer with weighted token scoring...");
 
         Self {
             embedder: CodeEmbedder::new(),
@@ -96,7 +101,7 @@ impl L3xAnalyzer {
         }
     }
 
-    /// Analyze a Solana program using AI-driven techniques
+    /// Analyze a Solana program using heuristic weighted-token techniques
     pub fn analyze_program(&mut self, program_path: &Path) -> Result<L3xAnalysisReport, String> {
         info!("L3X analyzing program at: {:?}", program_path);
 
@@ -227,22 +232,22 @@ impl L3xAnalyzer {
             execution_time_ms,
             ml_models_used: vec![
                 if self.config.use_embeddings {
-                    "CodeEmbedder-v2.1"
+                    "WeightedTokenScorer-v2.1"
                 } else {
                     ""
                 },
                 if self.config.use_gnn {
-                    "ControlFlowGNN-v1.5"
+                    "CFGStructuralAnalyzer-v1.5"
                 } else {
                     ""
                 },
                 if self.config.use_anomaly_detection {
-                    "AnomalyDetector-v3.0"
+                    "StatisticalAnomalyDetector-v3.0"
                 } else {
                     ""
                 },
                 if self.config.use_pattern_learning {
-                    "PatternLearner-v2.3"
+                    "ExploitPatternMatcher-v2.3"
                 } else {
                     ""
                 },
@@ -252,7 +257,7 @@ impl L3xAnalyzer {
             .map(|s| s.to_string())
             .collect(),
             confidence_threshold: self.config.confidence_threshold,
-            engine_version: "l3x-ai-analyzer-3.2.1".to_string(),
+            engine_version: "l3x-heuristic-analyzer-3.2.1".to_string(),
         })
     }
 

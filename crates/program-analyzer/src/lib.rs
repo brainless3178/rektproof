@@ -82,6 +82,24 @@ pub mod vuln_registry;
 pub mod converters;
 pub mod pipeline;
 
+// ── Advanced Mathematical Proof Modules ─────────────────────────────────
+// Certora/CertiK-grade formal verification techniques
+
+/// Octagon abstract domain: relational constraints ±xᵢ ± xⱼ ≤ c via DBMs
+pub mod octagon_domain;
+/// Separation logic for Solana account memory reasoning (∗ = separating conjunction)
+pub mod separation_logic;
+/// CTL temporal logic model checking for transaction sequence properties
+pub mod temporal_logic;
+/// CEGAR: Counterexample-Guided Abstraction Refinement with predicate abstraction
+pub mod cegar;
+/// Compositional verification via assume-guarantee reasoning for CPI chains
+pub mod compositional_verify;
+/// Information flow type system: non-interference for taint tracking
+pub mod information_flow_types;
+/// Solana-specific Bounded Model Checking with runtime semantics
+pub mod solana_bmc;
+
 #[cfg(test)]
 mod e2e_tests;
 

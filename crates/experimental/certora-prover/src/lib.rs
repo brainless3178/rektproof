@@ -1,33 +1,33 @@
-//! # Certora Solana Prover Integration
+//! # Certora-Style SBF Verification (Z3 Fallback)
 //!
-//! Integrates the [Certora Solana Prover](https://docs.certora.com/en/latest/docs/solana/index.html),
-//! a formal verification tool that operates directly on **SBF (Solana Binary Format)** bytecode.
+//! This crate generates CVLR (Certora Verification Language for Rust)
+//! specification rules and analyzes SBF (Solana Binary Format) bytecode.
 //!
-//! ## Why SBF-level verification?
+//! When the [Certora Solana Prover](https://docs.certora.com/en/latest/docs/solana/index.html)
+//! cloud service is available, it can run full bytecode verification.
 //!
-//! Source-code analysis (Kani, static analysis) operates on Rust AST and catches
-//! logic bugs visible in source. However, the Solana compiler toolchain
-//! (`cargo build-sbf`) can introduce bugs during:
+//! **In practice, the Certora prover is almost never installed**, so this
+//! crate falls back to two offline techniques:
 //!
-//! - LLVM optimizations (dead code elimination, reordering)
-//! - BPF code generation (register allocation, stack management)
-//! - Linking (cross-crate inlining, monomorphization)
+//! 1. **Z3 SMT Verification** — Encodes each generated CVLR rule as a Z3
+//!    formula and checks it mathematically. This provides genuine proofs
+//!    but operates on rule-level abstractions, not full bytecode semantics.
 //!
-//! The Certora Solana Prover catches these by verifying the **actual deployed bytecode**.
+//! 2. **SBF Binary Pattern Scanning** — Scans the `.so` ELF binary for
+//!    known bytecode patterns (missing CPI guards, unsafe syscalls, etc.)
 //!
 //! ## Pipeline
 //!
 //! 1. **Build** the Solana program via `cargo build-sbf` to produce `.so` files
-//! 2. **Generate** CVLR (Certora Verification Language for Rust) specification rules
-//! 3. **Build `.conf`** configuration for the Certora Prover
-//! 4. **Invoke** `certoraSolanaProver` or `cargo certora-sbf` subprocess
-//! 5. **Parse** verification results (PASSED/FAILED/TIMEOUT per rule)
-//! 6. **Offline fallback**: Direct SBF binary analysis when cloud prover is unavailable
+//! 2. **Analyze** the SBF binary for structural properties
+//! 3. **Generate** CVLR specification rules from source + binary info
+//! 4. **Invoke** `certoraSolanaProver` (or fall back to Z3 + pattern scanning)
+//! 5. **Parse** and aggregate results
 //!
 //! ## Integration point
 //!
-//! This runs **after** source-code analysis (ProgramAnalyzer, Kani) as a
-//! post-compilation validation step, before deployment.
+//! This runs **after** source-code analysis (ProgramAnalyzer) as an
+//! optional post-compilation validation step.
 
 pub mod bytecode_patterns;
 pub mod certora_runner;

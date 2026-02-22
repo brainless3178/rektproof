@@ -1,6 +1,6 @@
 //! L3X analysis report data structures
 //!
-//! Defines the output format for AI-driven vulnerability detection.
+//! Defines the output format for heuristic vulnerability detection.
 
 use serde::{Deserialize, Serialize};
 
@@ -37,7 +37,7 @@ pub struct L3xFinding {
     pub instruction: String,
     pub account_name: Option<String>,
     pub description: String,
-    pub ml_reasoning: String, // Why the ML model flagged this
+    pub ml_reasoning: String, // Why the heuristic scoring flagged this
     pub fix_recommendation: String,
     pub cwe: String,
     pub fingerprint: String,
