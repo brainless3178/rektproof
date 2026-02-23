@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! # Sec3 (formerly Soteria) Advanced Static Analyzer
 //!
 //! Enterprise-grade static analysis engine for Solana Anchor programs,

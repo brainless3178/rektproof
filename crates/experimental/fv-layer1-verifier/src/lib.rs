@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use std::path::Path;
 use serde::{Deserialize, Serialize};
 use anyhow::Result;

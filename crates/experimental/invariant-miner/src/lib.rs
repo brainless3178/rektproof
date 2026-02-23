@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! Invariant Miner - Automatic Program Invariant Discovery
 //!
 //! Analyzes Solana programs to discover implicit invariants that

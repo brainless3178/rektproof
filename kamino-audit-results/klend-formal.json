@@ -1,0 +1,69 @@
+
+  🔬  Running formal verification pipeline on: /tmp/kamino-scan/klend/programs/klend/src
+  ├─ 🔍 Kani model checking...
+  │  ok Kani: 0 verified, 355 failed
+  ├─ 🔍 Certora prover...
+  │  [warn] Certora: BuildError("No .so file found after cargo build-sbf")
+  ├─ 🔍 Wacana concolic analysis...
+  │  ok Wacana: 0 paths, 4 findings
+  ├─ 🔍 Crux-MIR analysis...
+  │  ok Crux-MIR: 258 findings, 150 instructions
+  └─ 🔬 FV Scanner (4-layer Z3 pipeline)...
+     ⟳ Layer 1: Arithmetic & Logic...
+     ok Layer 1 complete
+     ⟳ Layer 2: Deep Symbolic Exploration...
+     ok Layer 2 complete
+     ⟳ Layer 3: Cross-Program Safety...
+     ok Layer 3 complete
+     ⟳ Layer 4: Protocol Design Guarantee...
+     ok FV Scanner: completed in 279912ms
+     ok Layer 4 complete
+
+  ok  Formal verification completed in 444.97s
+{
+  "elapsed_secs": 444.972436166,
+  "formal_verification": [
+    {
+      "engine": "kani",
+      "failed_properties": 355,
+      "status": "InvariantViolation",
+      "verified_properties": 0
+    },
+    {
+      "engine": "certora",
+      "error": "BuildError(\"No .so file found after cargo build-sbf\")",
+      "status": "error"
+    },
+    {
+      "engine": "wacana",
+      "findings": 4,
+      "paths_explored": 0
+    },
+    {
+      "engine": "crux-mir",
+      "findings": 258,
+      "instructions_analyzed": 150
+    },
+    {
+      "duration_ms": 279912,
+      "engine": "fv-scanner",
+      "layer1": {
+        "findings": 1122,
+        "status": "Failed"
+      },
+      "layer2": {
+        "proofs": 533
+      },
+      "layer3": {
+        "invariants_checked": 0,
+        "status": "Verified",
+        "violations": 0
+      },
+      "layer4": {
+        "state_transitions": 2,
+        "status": "VIOLATIONS — 1 state transition properties failed"
+      },
+      "scan_id": "scan_1771839780"
+    }
+  ]
+}

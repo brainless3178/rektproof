@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! FuzzDelSol — Coverage-Guided eBPF Binary Fuzzer
 //!
 //! FuzzDelSol is a coverage-guided binary fuzzer for Solana eBPF bytecode.

@@ -353,7 +353,7 @@ impl FlowTypeChecker {
         target: &str,
         sources: &[&str],
         target_type: &str,
-        line: usize,
+        _line: usize,
     ) {
         let mut result_label = self.context.pc_label();
 
@@ -401,7 +401,7 @@ impl FlowTypeChecker {
         &mut self,
         callee_program: &str,
         result_var: &str,
-        line: usize,
+        _line: usize,
     ) {
         let result_label = if is_trusted_program(callee_program) {
             SecurityLabel::AccountData // Known program — data is semi-trusted

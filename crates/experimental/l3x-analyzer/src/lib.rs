@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! # L3X Heuristic Code Analyzer for Solana
 //!
 //! L3X uses weighted-token scoring and control flow graph structural analysis

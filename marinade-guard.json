@@ -1,0 +1,8 @@
+{
+  "cargo_findings": [],
+  "npm_findings": [],
+  "behavioral_findings": [],
+  "risk_score": 0,
+  "cargo_files_scanned": 3,
+  "npm_files_scanned": 0
+}

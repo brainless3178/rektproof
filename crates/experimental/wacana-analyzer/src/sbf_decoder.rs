@@ -93,7 +93,7 @@ pub struct SbfDecodeResult {
 }
 
 // ─── BPF Opcode Constants ─────────────────────────────────────────────────
-#[allow(dead_code)]
+
 // ALU operations
 const BPF_ALU: u8 = 0x04;
 const BPF_ALU64: u8 = 0x07;

@@ -11,7 +11,7 @@ use std::str::FromStr;
 
 pub struct ExploitExecutor {
     client: RpcClient,
-    #[allow(dead_code)]
+    
     config: ForgeConfig,
 }
 

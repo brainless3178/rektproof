@@ -1041,11 +1041,12 @@ pub async fn token_risk(
 
 /// Request body for transaction risk simulation
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 pub struct SimulateRequest {
     /// List of program IDs the transaction interacts with (base58)
     pub program_ids: Vec<String>,
     /// Optional: raw transaction bytes (base58-encoded) for deeper analysis
-    #[allow(dead_code)]
+    
     pub transaction: Option<String>,
 }
 

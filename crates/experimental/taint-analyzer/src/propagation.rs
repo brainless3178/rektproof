@@ -59,7 +59,7 @@ pub enum TaintSeverity {
 
 /// Variable state in the taint analysis
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
+
 struct VariableState {
     name: String,
     labels: HashSet<TaintLabel>,
@@ -67,7 +67,7 @@ struct VariableState {
 }
 
 /// The main taint analyzer
-#[allow(dead_code)]
+
 pub struct TaintAnalyzer {
     /// Graph representing data flow
     flow_graph: DiGraph<FlowNode, FlowEdge>,
@@ -90,7 +90,7 @@ struct FlowNode {
 }
 
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
+
 enum FlowNodeKind {
     Source(TaintSource),
     Sink(TaintSink),
@@ -99,7 +99,7 @@ enum FlowNodeKind {
 }
 
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
+
 struct FlowEdge {
     label: String,
 }

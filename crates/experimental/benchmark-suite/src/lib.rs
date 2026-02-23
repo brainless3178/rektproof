@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! Benchmark Suite for Solana Security Swarm
 //!
 //! Provides benchmarking utilities for measuring analysis performance

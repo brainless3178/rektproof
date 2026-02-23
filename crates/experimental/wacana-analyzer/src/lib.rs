@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! # WACANA — Concolic Analysis for WASM/SBF Smart Contracts
 //!
 //! A specialized concolic analyzer designed to detect on-chain data

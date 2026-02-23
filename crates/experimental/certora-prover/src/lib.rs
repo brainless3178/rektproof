@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! # Certora-Style SBF Verification (Z3 Fallback)
 //!
 //! This crate generates CVLR (Certora Verification Language for Rust)

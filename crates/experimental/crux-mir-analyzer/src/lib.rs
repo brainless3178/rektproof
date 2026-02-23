@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! # Crux-MIR Security Analyzer — AST-Based Fallback
 //!
 //! **Honest disclosure:** This crate performs Rust AST-based security analysis

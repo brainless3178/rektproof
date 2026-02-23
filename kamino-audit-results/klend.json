@@ -1,0 +1,576 @@
+  + Phase timing:
+    Initialization: 92ms
+    Vulnerability scan: 77563ms
+    Total findings (pre-filter): 9
+[
+  {
+    "attack_scenario": "Attacker passes their own pubkey as `lending_market_authority`. Since there is no signer constraint, the runtime accepts the instruction and the attacker executes privileged operations.",
+    "category": "Authentication",
+    "confidence": 80,
+    "cwe": "CWE-287",
+    "description": "Field `lending_market_authority` in `DepositReserveLiquidityAccounts` uses raw `AccountInfo<'info>` without `Signer<'info>` or `#[account(signer)]`. Any pubkey can be passed as this account — the Solana runtime will NOT enforce signing. This allows unauthorized access to privileged operations. [found in 22 locations; also in: handler_withdraw_referrer_fees.rs:WithdrawReferrerFees, handler_withdraw_protocol_fees.rs:WithdrawProtocolFees, handler_withdraw_obligation_collateral_and_redeem_reserve_collateral.rs:WithdrawObligationCollateralAndRedeemReserveCollateral, handler_withdraw_obligation_collateral.rs:WithdrawObligationCollateral, handler_socialize_loss.rs:SocializeLossV2, handler_repay_obligation_liquidity.rs:RepayObligationLiquidityV2, handler_refresh_obligation_farms_for_reserve.rs:RefreshObligationFarmsForReserveBase, handler_redeem_reserve_collateral.rs:RedeemReserveCollateral, handler_redeem_fees.rs:RedeemFees, handler_liquidate_obligation_and_redeem_reserve_collateral.rs:LiquidateObligationAndRedeemReserveCollateral, handler_init_reserve.rs:InitReserve, handler_init_obligation_farms_for_reserve.rs:InitObligationFarmsForReserve, handler_init_lending_market.rs:InitLendingMarket, handler_init_farms_for_reserve.rs:InitFarmsForReserve, handler_flash_repay_reserve_liquidity.rs:FlashRepayReserveLiquidity, handler_flash_borrow_reserve_liquidity.rs:FlashBorrowReserveLiquidity, handler_fill_borrow_order.rs:FillBorrowOrderAccounts, handler_deposit_reserve_liquidity_and_obligation_collateral.rs:DepositReserveLiquidityAndObligationCollateral, handler_deposit_reserve_liquidity.rs:DepositReserveLiquidity, handler_deposit_obligation_collateral.rs:DepositObligationCollateralV2, handler_borrow_obligation_liquidity.rs:BorrowObligationLiquidity]",
+    "fix": {
+      "diff": "- pub lending_market_authority: AccountInfo<'info>,\n+ #[derive(Accounts)]",
+      "explanation": "Apply the 'Signer Validation' pattern: Validates account is a signer",
+      "fixed_code": "\n#[derive(Accounts)]\npub struct SecureAccounts<'info> {\n    #[account(mut)]\n    pub authority: Signer<'info>,\n    // ... other accounts\n}\n",
+      "original_code": "pub lending_market_authority: AccountInfo<'info>,",
+      "vulnerability_id": "SOL-001"
+    },
+    "function_name": "DepositReserveLiquidityAccounts",
+    "id": "SOL-001",
+    "line_number": 23,
+    "location": "nested_accounts.rs",
+    "poc": {
+      "attack_steps": [
+        {
+          "action_type": "Setup",
+          "code_snippet": "pub lending_market_authority: AccountInfo<'info>,",
+          "description": "Identify the vulnerable instruction that doesn't verify signer",
+          "step_number": 1
+        },
+        {
+          "action_type": "Transaction",
+          "code_snippet": null,
+          "description": "Craft transaction with victim's authority but without their signature",
+          "step_number": 2
+        },
+        {
+          "action_type": "Exploitation",
+          "code_snippet": null,
+          "description": "Submit transaction - only attacker signs",
+          "step_number": 3
+        },
+        {
+          "action_type": "Extraction",
+          "code_snippet": null,
+          "description": "Funds transferred to attacker's account",
+          "step_number": 4
+        }
+      ],
+      "difficulty": "Trivial",
+      "economic_impact": "CRITICAL - Complete vault/account drainage possible",
+      "expected_outcome": "Attacker can perform actions on behalf of any authority without their consent",
+      "mitigations": [
+        "Add Signer<'info> constraint to authority account",
+        "Use #[account(signer)] macro for Anchor programs",
+        "Verify ctx.accounts.authority.is_signer in handler"
+      ],
+      "prerequisites": [
+        "Knowledge of victim's public key",
+        "Program ID and IDL"
+      ],
+      "rust_poc": "// Rust PoC for SOL-001: Missing Signer Check\nuse solana_sdk::{\n    instruction::{AccountMeta, Instruction},\n    pubkey::Pubkey,\n    signature::Keypair,\n    signer::Signer,\n    transaction::Transaction,\n};\n\npub fn exploit_missing_signer(\n    program_id: &Pubkey,\n    victim_authority: &Pubkey,\n    attacker: &Keypair,\n    vault: &Pubkey,\n) -> Instruction {\n    // Craft instruction with victim's authority but without their signature\n    Instruction {\n        program_id: *program_id,\n        accounts: vec![\n            AccountMeta::new(*vault, false),       // Vault (writable)\n            AccountMeta::new_readonly(*victim_authority, false), // Authority (NOT signer!)\n            AccountMeta::new(attacker.pubkey(), true), // Attacker's account\n        ],\n        data: vec![/* DepositReserveLiquidityAccounts instruction discriminator + withdraw amount */],\n    }\n}",
+      "scenario_name": "SOL-001: Missing Signer Check in DepositReserveLiquidityAccounts",
+      "typescript_poc": "import * as anchor from \"@coral-xyz/anchor\";\nimport { expect } from \"chai\";\n\ndescribe(\"SOL-001 Exploit: Missing Signer Check\", () => {\n  const provider = anchor.AnchorProvider.env();\n  anchor.setProvider(provider);\n  \n  it(\"allows unauthorized action without proper signer\", async () => {\n    const attacker = anchor.web3.Keypair.generate();\n    const victim = anchor.web3.Keypair.generate();\n    \n    // Airdrop SOL to attacker\n    await provider.connection.requestAirdrop(\n      attacker.publicKey,\n      anchor.web3.LAMPORTS_PER_SOL\n    );\n    \n    // Setup: Victim deposits funds\n    const victimVault = anchor.web3.Keypair.generate();\n    // ... initialize vault with victim's funds ...\n    \n    // EXPLOIT: Attacker calls DepositReserveLiquidityAccounts without being the authority signer\n    const tx = await program.methods\n      .DepositReserveLiquidityAccounts(new anchor.BN(1_000_000_000)) // Drain amount\n      .accounts({\n        vault: victimVault.publicKey,\n        authority: victim.publicKey, // Victim's authority (NOT signing!)\n        destination: attacker.publicKey,\n        systemProgram: anchor.web3.SystemProgram.programId,\n      })\n      .signers([attacker]) // Only attacker signs, not victim!\n      .rpc();\n    \n    console.log(\"Exploit TX:\", tx);\n    \n    // Verify: Funds were stolen\n    const attackerBalance = await provider.connection.getBalance(attacker.publicKey);\n    expect(attackerBalance).to.be.greaterThan(anchor.web3.LAMPORTS_PER_SOL);\n  });\n});",
+      "vulnerability_id": "SOL-001"
+    },
+    "prevention": "Always use Signer<'info> for authority accounts.",
+    "real_world_incident": {
+      "date": "2022-02-02",
+      "loss": "$320M",
+      "project": "Wormhole"
+    },
+    "secure_fix": "Change `pub lending_market_authority: AccountInfo<'info>` to `pub lending_market_authority: Signer<'info>`, or add `#[account(signer)]`.",
+    "severity": 5,
+    "severity_label": "CRITICAL",
+    "simulation": {
+      "rpc": "https://api.devnet.solana.com",
+      "simulate_only": true,
+      "status": "simulated",
+      "summary": "Simulated MissingSignerCheck exploit for SOL-001 (Missing Signer Check). Config: RPC=https://api.devnet.solana.com, simulate_only=true, compute_budget=200000"
+    },
+    "vuln_type": "Missing Signer Check",
+    "vulnerable_code": "pub lending_market_authority: AccountInfo<'info>,"
+  },
+  {
+    "attack_scenario": "Attacker calls the mint instruction bypassing authority checks. If the mint is PDA-controlled, the program signs with invoke_signed, minting tokens to the attacker. They then sell the freshly minted tokens on a DEX, crashing the token price and profiting.",
+    "category": "Token Security",
+    "confidence": 75,
+    "cwe": "CWE-269",
+    "description": "A `mint_to` CPI is performed without validating the mint authority as a `Signer<'info>`. Anyone can call this instruction and mint unlimited tokens. The SPL Token program requires the mint authority to sign the transaction, but if a PDA is the mint authority, the instruction handler must verify that the caller is authorized to trigger the PDA-signed mint.",
+    "function_name": "process",
+    "id": "SOL-031",
+    "line_number": 23,
+    "location": "handler_init_reserve.rs",
+    "poc": {
+      "attack_steps": [
+        {
+          "action_type": "Setup",
+          "code_snippet": "pub fn process < 'info> (ctx : Context<'_ , '_ , '_ , 'info, InitReserve < 'info> >) -> Result<() > { let clock = & Clock :: get () ? ; let reserve = & mut ctx . accounts . reserve . load_init () ? ; let market = & ctx . accounts . lending_market . load () ? ; let reserve_key = ctx . accounts . reserve . key () ; let reserve_liquidity_supply_signer_seeds = gen_reserve_token_account_signer_seeds ! (seeds :: RESERVE_LIQ_SUPPLY , reserve_key , ctx . bumps . reserve_liquidity_supply) ; let fee_receiver_signer_seeds = gen_reserve_token_account_signer_seeds ! (seeds :: FEE_RECEIVER , reserve_key , ctx . bumps . fee_receiver) ; account_ops :: initialize_pda_token_account (& ctx . accounts . signer . to_account_info () , & ctx . accounts . reserve_liquidity_supply , & ctx . accounts . reserve_liquidity_mint , & ctx . accounts . lending_market_authority . to_account_info () , & ctx . accounts . liquidity_token_program , & ctx . accounts . system_program . to_account_info () , & [reserve_liquidity_supply_signer_seeds] ,) ? ; account_ops :: initialize_pda_token_account (& ctx . accounts . signer . to_account_info () , & ctx . accounts . fee_receiver , & ctx . accounts . reserve_liquidity_mint , & ctx . accounts . lending_market_authority . to_account_info () , & ctx . accounts . liquidity_token_program , & ctx . accounts . system_program . to_account_info () , & [fee_receiver_signer_seeds] ,) ? ; constraints :: token_2022 :: validate_liquidity_token_extensions (& ctx . accounts . reserve_liquidity_mint . to_account_info () , & ctx . accounts . reserve_liquidity_supply . to_account_info () ,) ? ; let is_frozen_default_account_state_extension = spltoken :: is_frozen_default_account_state_extension (& ctx . accounts . reserve_liquidity_mint . to_account_info () ,) ? ; let min_initial_deposit_amount = if is_frozen_default_account_state_extension { 0 } else { market . min_initial_deposit_amount } ; reserve . init (InitReserveParams { current_slot : clock . slot , lending_market : ctx . accounts . lending_market . key () , liquidity : Box :: new (ReserveLiquidity :: new (NewReserveLiquidityParams { mint_pubkey : ctx . accounts . reserve_liquidity_mint . key () , mint_decimals : ctx . accounts . reserve_liquidity_mint . decimals , mint_token_program : ctx . accounts . liquidity_token_program . key () , supply_vault : ctx . accounts . reserve_liquidity_supply . key () , fee_vault : ctx . accounts . fee_receiver . key () , market_price_sf : 0 , initial_amount_deposited_in_reserve : min_initial_deposit_amount , })) , collateral : Box :: new (ReserveCollateral :: new (NewReserveCollateralParams { mint_pubkey : ctx . accounts . reserve_collateral_mint . key () , supply_vault : ctx . accounts . reserve_collateral_supply . key () , initial_collateral_supply : min_initial_deposit_amount , })) , config : Box :: new (ReserveConfig { status : ReserveStatus :: Hidden . into () , .. Default :: default () }) , }) ; token_transfer :: deposit_initial_reserve_liquidity_transfer (ctx . accounts . initial_liquidity_source . to_account_info () , ctx . accounts . reserve_liquidity_supply . to_account_info () , ctx . accounts . signer . to_account_info () , ctx . accounts . reserve_liquidity_mint . to_account_info () , ctx . accounts . liquidity_token_program . to_account_info () , min_initial_deposit_amount , ctx . accounts . reserve_liquidity_mint . decimals ,) ? ; Ok (()) }",
+          "description": "Analyze vulnerable function: process",
+          "step_number": 1
+        },
+        {
+          "action_type": "Transaction",
+          "code_snippet": null,
+          "description": "Construct malicious transaction",
+          "step_number": 2
+        },
+        {
+          "action_type": "Exploitation",
+          "code_snippet": null,
+          "description": "Execute exploit and extract value",
+          "step_number": 3
+        }
+      ],
+      "difficulty": "Trivial",
+      "economic_impact": "CRITICAL - Severe financial impact",
+      "expected_outcome": "Vulnerability exploited: A `mint_to` CPI is performed without validating the mint authority as a `Signer<'info>`. Anyone can call this instruction and mint unlimited tokens. The SPL Token program requires the mint authority to sign the transaction, but if a PDA is the mint authority, the instruction handler must verify that the caller is authorized to trigger the PDA-signed mint.",
+      "mitigations": [
+        "Gate all mint operations behind Signer-validated authority checks. Consider implementing supply caps for fixed-supply tokens."
+      ],
+      "prerequisites": [
+        "Access to handler_init_reserve.rs"
+      ],
+      "rust_poc": null,
+      "scenario_name": "SOL-031: Unauthorized Token Mint",
+      "typescript_poc": null,
+      "vulnerability_id": "SOL-031"
+    },
+    "prevention": "Gate all mint operations behind Signer-validated authority checks. Consider implementing supply caps for fixed-supply tokens.",
+    "real_world_incident": null,
+    "secure_fix": "Validate mint authority: `pub mint_authority: Signer<'info>` with `has_one = mint_authority` on the config account. For PDA-minted tokens, require an admin Signer and enforce supply caps.",
+    "severity": 5,
+    "severity_label": "CRITICAL",
+    "simulation": {
+      "rpc": "https://api.devnet.solana.com",
+      "simulate_only": true,
+      "status": "simulated",
+      "summary": "Simulated AccountConfusion exploit for SOL-031 (Unauthorized Token Mint). Config: RPC=https://api.devnet.solana.com, simulate_only=true, compute_budget=200000"
+    },
+    "vuln_type": "Unauthorized Token Mint",
+    "vulnerable_code": "pub fn process < 'info> (ctx : Context<'_ , '_ , '_ , 'info, InitReserve < 'info> >) -> Result<() > { let clock = & Clock :: get () ? ; let reserve = & mut ctx . accounts . reserve . load_init () ? ; let market = & ctx . accounts . lending_market . load () ? ; let reserve_key = ctx . accounts . reserve . key () ; let reserve_liquidity_supply_signer_seeds = gen_reserve_token_account_signer_seeds ! (seeds :: RESERVE_LIQ_SUPPLY , reserve_key , ctx . bumps . reserve_liquidity_supply) ; let fee_receiver_signer_seeds = gen_reserve_token_account_signer_seeds ! (seeds :: FEE_RECEIVER , reserve_key , ctx . bumps . fee_receiver) ; account_ops :: initialize_pda_token_account (& ctx . accounts . signer . to_account_info () , & ctx . accounts . reserve_liquidity_supply , & ctx . accounts . reserve_liquidity_mint , & ctx . accounts . lending_market_authority . to_account_info () , & ctx . accounts . liquidity_token_program , & ctx . accounts . system_program . to_account_info () , & [reserve_liquidity_supply_signer_seeds] ,) ? ; account_ops :: initialize_pda_token_account (& ctx . accounts . signer . to_account_info () , & ctx . accounts . fee_receiver , & ctx . accounts . reserve_liquidity_mint , & ctx . accounts . lending_market_authority . to_account_info () , & ctx . accounts . liquidity_token_program , & ctx . accounts . system_program . to_account_info () , & [fee_receiver_signer_seeds] ,) ? ; constraints :: token_2022 :: validate_liquidity_token_extensions (& ctx . accounts . reserve_liquidity_mint . to_account_info () , & ctx . accounts . reserve_liquidity_supply . to_account_info () ,) ? ; let is_frozen_default_account_state_extension = spltoken :: is_frozen_default_account_state_extension (& ctx . accounts . reserve_liquidity_mint . to_account_info () ,) ? ; let min_initial_deposit_amount = if is_frozen_default_account_state_extension { 0 } else { market . min_initial_deposit_amount } ; reserve . init (InitReserveParams { current_slot : clock . slot , lending_market : ctx . accounts . lending_market . key () , liquidity : Box :: new (ReserveLiquidity :: new (NewReserveLiquidityParams { mint_pubkey : ctx . accounts . reserve_liquidity_mint . key () , mint_decimals : ctx . accounts . reserve_liquidity_mint . decimals , mint_token_program : ctx . accounts . liquidity_token_program . key () , supply_vault : ctx . accounts . reserve_liquidity_supply . key () , fee_vault : ctx . accounts . fee_receiver . key () , market_price_sf : 0 , initial_amount_deposited_in_reserve : min_initial_deposit_amount , })) , collateral : Box :: new (ReserveCollateral :: new (NewReserveCollateralParams { mint_pubkey : ctx . accounts . reserve_collateral_mint . key () , supply_vault : ctx . accounts . reserve_collateral_supply . key () , initial_collateral_supply : min_initial_deposit_amount , })) , config : Box :: new (ReserveConfig { status : ReserveStatus :: Hidden . into () , .. Default :: default () }) , }) ; token_transfer :: deposit_initial_reserve_liquidity_transfer (ctx . accounts . initial_liquidity_source . to_account_info () , ctx . accounts . reserve_liquidity_supply . to_account_info () , ctx . accounts . signer . to_account_info () , ctx . accounts . reserve_liquidity_mint . to_account_info () , ctx . accounts . liquidity_token_program . to_account_info () , min_initial_deposit_amount , ctx . accounts . reserve_liquidity_mint . decimals ,) ? ; Ok (()) }"
+  },
+  {
+    "attack_scenario": "Attacker manipulates state during flash loan and doesn't repay.",
+    "category": "DeFi Security",
+    "confidence": 75,
+    "cwe": "CWE-362",
+    "description": "Flash loan without proper repayment validation.",
+    "fix": {
+      "diff": "- /* ACCOUNTS_STRUCT: FlashRepayReserveLiquidity */\n+ #[account]",
+      "explanation": "Apply the 'Reentrancy Guard' pattern: Prevents reentrancy attacks",
+      "fixed_code": "\n#[account]\npub struct State {\n    pub is_locked: bool,\n    // ... other fields\n}\n\npub fn secure_instruction(ctx: Context<SecureInstruction>) -> Result<()> {\n    let state = &mut ctx.accounts.state;\n    \n    // Check and set lock\n    require!(!state.is_locked, ErrorCode::ReentrancyDetected);\n    state.is_locked = true;\n    \n    // Do work here (including any CPI)\n    // ...\n    \n    // Release lock\n    state.is_locked = false;\n    \n    Ok(())\n}\n",
+      "original_code": "/* ACCOUNTS_STRUCT: FlashRepayReserveLiquidity */\n#[derive (Accounts)] pub struct FlashRepayReserveLiquidity < 'info> { pub user_transfer_authority : Signer<'info> , #[doc = \" CHECK: Verified through create_program_address, unused needed for `FlashBorrowReserveLiquidity`\"] #[account (seeds = [seeds :: LENDING_MARKET_AUTH , lending_market . key () . as_ref ()] , bump = lending_market . load () ?. bump_seed as u8 ,)] pub lending_market_authority : AccountInfo<'info> , pub lending_market : AccountLoader<'info, LendingMarket > , #[account (mut, has_one = lending_market)] pub reserve : AccountLoader<'info, Reserve > , #[account (address = reserve . load () ?. liquidity . mint_pubkey , mint :: token_program = token_program ,)] pub reserve_liquidity_mint : Box<InterfaceAccount<'info, Mint> > , #[account (mut, address = reserve . load () ?. liquidity . supply_vault ,)] pub reserve_destination_liquidity : Box<InterfaceAccount<'info, TokenAccount> > , #[account (mut)] pub user_source_liquidity : Box<InterfaceAccount<'info, TokenAccount> > , #[account (mut, address = reserve . load () ?. liquidity . fee_vault)] pub reserve_liquidity_fee_receiver : Box<InterfaceAccount<'info, TokenAccount> > , #[account (mut)] pub referrer_token_state : Option<AccountLoader<'info, ReferrerTokenState > > , #[account (mut)] pub referrer_account : Option<AccountInfo<'info> > , #[doc = \" CHECK: fixed address\"] #[account (address = sysvar :: instructions :: ID)] pub sysvar_info : AccountInfo<'info> , pub token_program : Interface<'info, TokenInterface > , }\n/* HANDLER: */\npub fn process (ctx : Context<FlashRepayReserveLiquidity > , liquidity_amount : u64 , borrow_instruction_index : u8 ,) -> Result<() > { lending_checks :: flash_repay_reserve_liquidity_checks (& ctx) ? ; let reserve = & mut ctx . accounts . reserve . load_mut () ? ; let lending_market = & ctx . accounts . lending_market . load () ? ; let initial_reserve_token_balance = token_interface :: accessor :: amount (& ctx . accounts . reserve_destination_liquidity . to_account_info () ,) ? ; let initial_reserve_available_liquidity = reserve . liquidity . available_amount ; flash_ixs :: flash_repay_checks (& ctx , borrow_instruction_index , liquidity_amount) ? ; let referrer_account = & ctx . accounts . referrer_account ; let referrer_token_state_loader = if referrer_account . is_some () { match & ctx . accounts . referrer_token_state { Some (referrer_token_state_loader) => { let referrer_token_state = & mut referrer_token_state_loader . load_mut () ? ; validate_referrer_token_state (& crate :: ID , referrer_token_state , referrer_token_state_loader . key () , reserve . liquidity . mint_pubkey , referrer_account . as_ref () . unwrap () . key () , ctx . accounts . reserve . key () ,) ? ; Some (referrer_token_state_loader) } None => { msg ! (\"No referrer account provided\") ; None } } } else { None } ; let (flash_loan_amount_with_referrer_fee , reserve_origination_fee) = lending_operations :: flash_repay_reserve_liquidity (lending_market , reserve , liquidity_amount , u64 :: try_from (Clock :: get () ? . unix_timestamp) . unwrap () , referrer_token_state_loader ,) ? ; token_transfer :: repay_obligation_liquidity_transfer (ctx . accounts . token_program . to_account_info () , ctx . accounts . reserve_liquidity_mint . to_account_info () , ctx . accounts . user_source_liquidity . to_account_info () , ctx . accounts . reserve_destination_liquidity . to_account_info () , ctx . accounts . user_transfer_authority . to_account_info () , flash_loan_amount_with_referrer_fee , ctx . accounts . reserve_liquidity_mint . decimals ,) ? ; if reserve_origination_fee > 0 { token_transfer :: pay_borrowing_fees_transfer (ctx . accounts . token_program . to_account_info () , ctx . accounts . reserve_liquidity_mint . to_account_info () , ctx . accounts . user_source_liquidity . to_account_info () , ctx . accounts . reserve_liquidity_fee_receiver . to_account_info () , ctx . accounts . user_transfer_authority . to_account_info () , reserve_origination_fee , ctx . accounts . reserve_liquidity_mint . decimals ,) ? ; } lending_checks :: post_transfer_vault_balance_liquidity_reserve_checks (token_interface :: accessor :: amount (& ctx . accounts . reserve_destination_liquidity . to_account_info () ,) . unwrap () , reserve . liquidity . available_amount , initial_reserve_token_balance , initial_reserve_available_liquidity , LendingAction :: Additive (flash_loan_amount_with_referrer_fee) ,) ? ; Ok (()) }",
+      "vulnerability_id": "SOL-018"
+    },
+    "function_name": "process",
+    "id": "SOL-018",
+    "line_number": 12,
+    "location": "handler_flash_repay_reserve_liquidity.rs",
+    "poc": {
+      "attack_steps": [
+        {
+          "action_type": "Setup",
+          "code_snippet": "/* ACCOUNTS_STRUCT: FlashRepayReserveLiquidity */\n#[derive (Accounts)] pub struct FlashRepayReserveLiquidity < 'info> { pub user_transfer_authority : Signer<'info> , #[doc = \" CHECK: Verified through create_program_address, unused needed for `FlashBorrowReserveLiquidity`\"] #[account (seeds = [seeds :: LENDING_MARKET_AUTH , lending_market . key () . as_ref ()] , bump = lending_market . load () ?. bump_seed as u8 ,)] pub lending_market_authority : AccountInfo<'info> , pub lending_market : AccountLoader<'info, LendingMarket > , #[account (mut, has_one = lending_market)] pub reserve : AccountLoader<'info, Reserve > , #[account (address = reserve . load () ?. liquidity . mint_pubkey , mint :: token_program = token_program ,)] pub reserve_liquidity_mint : Box<InterfaceAccount<'info, Mint> > , #[account (mut, address = reserve . load () ?. liquidity . supply_vault ,)] pub reserve_destination_liquidity : Box<InterfaceAccount<'info, TokenAccount> > , #[account (mut)] pub user_source_liquidity : Box<InterfaceAccount<'info, TokenAccount> > , #[account (mut, address = reserve . load () ?. liquidity . fee_vault)] pub reserve_liquidity_fee_receiver : Box<InterfaceAccount<'info, TokenAccount> > , #[account (mut)] pub referrer_token_state : Option<AccountLoader<'info, ReferrerTokenState > > , #[account (mut)] pub referrer_account : Option<AccountInfo<'info> > , #[doc = \" CHECK: fixed address\"] #[account (address = sysvar :: instructions :: ID)] pub sysvar_info : AccountInfo<'info> , pub token_program : Interface<'info, TokenInterface > , }\n/* HANDLER: */\npub fn process (ctx : Context<FlashRepayReserveLiquidity > , liquidity_amount : u64 , borrow_instruction_index : u8 ,) -> Result<() > { lending_checks :: flash_repay_reserve_liquidity_checks (& ctx) ? ; let reserve = & mut ctx . accounts . reserve . load_mut () ? ; let lending_market = & ctx . accounts . lending_market . load () ? ; let initial_reserve_token_balance = token_interface :: accessor :: amount (& ctx . accounts . reserve_destination_liquidity . to_account_info () ,) ? ; let initial_reserve_available_liquidity = reserve . liquidity . available_amount ; flash_ixs :: flash_repay_checks (& ctx , borrow_instruction_index , liquidity_amount) ? ; let referrer_account = & ctx . accounts . referrer_account ; let referrer_token_state_loader = if referrer_account . is_some () { match & ctx . accounts . referrer_token_state { Some (referrer_token_state_loader) => { let referrer_token_state = & mut referrer_token_state_loader . load_mut () ? ; validate_referrer_token_state (& crate :: ID , referrer_token_state , referrer_token_state_loader . key () , reserve . liquidity . mint_pubkey , referrer_account . as_ref () . unwrap () . key () , ctx . accounts . reserve . key () ,) ? ; Some (referrer_token_state_loader) } None => { msg ! (\"No referrer account provided\") ; None } } } else { None } ; let (flash_loan_amount_with_referrer_fee , reserve_origination_fee) = lending_operations :: flash_repay_reserve_liquidity (lending_market , reserve , liquidity_amount , u64 :: try_from (Clock :: get () ? . unix_timestamp) . unwrap () , referrer_token_state_loader ,) ? ; token_transfer :: repay_obligation_liquidity_transfer (ctx . accounts . token_program . to_account_info () , ctx . accounts . reserve_liquidity_mint . to_account_info () , ctx . accounts . user_source_liquidity . to_account_info () , ctx . accounts . reserve_destination_liquidity . to_account_info () , ctx . accounts . user_transfer_authority . to_account_info () , flash_loan_amount_with_referrer_fee , ctx . accounts . reserve_liquidity_mint . decimals ,) ? ; if reserve_origination_fee > 0 { token_transfer :: pay_borrowing_fees_transfer (ctx . accounts . token_program . to_account_info () , ctx . accounts . reserve_liquidity_mint . to_account_info () , ctx . accounts . user_source_liquidity . to_account_info () , ctx . accounts . reserve_liquidity_fee_receiver . to_account_info () , ctx . accounts . user_transfer_authority . to_account_info () , reserve_origination_fee , ctx . accounts . reserve_liquidity_mint . decimals ,) ? ; } lending_checks :: post_transfer_vault_balance_liquidity_reserve_checks (token_interface :: accessor :: amount (& ctx . accounts . reserve_destination_liquidity . to_account_info () ,) . unwrap () , reserve . liquidity . available_amount , initial_reserve_token_balance , initial_reserve_available_liquidity , LendingAction :: Additive (flash_loan_amount_with_referrer_fee) ,) ? ; Ok (()) }",
+          "description": "Analyze vulnerable function: process",
+          "step_number": 1
+        },
+        {
+          "action_type": "Transaction",
+          "code_snippet": null,
+          "description": "Construct malicious transaction",
+          "step_number": 2
+        },
+        {
+          "action_type": "Exploitation",
+          "code_snippet": null,
+          "description": "Execute exploit and extract value",
+          "step_number": 3
+        }
+      ],
+      "difficulty": "Trivial",
+      "economic_impact": "CRITICAL - Severe financial impact",
+      "expected_outcome": "Vulnerability exploited: Flash loan without proper repayment validation.",
+      "mitigations": [
+        "Track pre/post balances and enforce invariants"
+      ],
+      "prerequisites": [
+        "Access to handler_flash_repay_reserve_liquidity.rs"
+      ],
+      "rust_poc": null,
+      "scenario_name": "SOL-018: Flash Loan Vulnerability",
+      "typescript_poc": null,
+      "vulnerability_id": "SOL-018"
+    },
+    "prevention": "Track pre/post balances and enforce invariants",
+    "real_world_incident": {
+      "date": "2020-2023",
+      "loss": "$200M+",
+      "project": "Multiple"
+    },
+    "secure_fix": "Verify repayment + fee at end of flash loan instruction",
+    "severity": 5,
+    "severity_label": "CRITICAL",
+    "simulation": {
+      "rpc": "https://api.devnet.solana.com",
+      "simulate_only": true,
+      "status": "simulated",
+      "summary": "Simulated AccountConfusion exploit for SOL-018 (Flash Loan Vulnerability). Config: RPC=https://api.devnet.solana.com, simulate_only=true, compute_budget=200000"
+    },
+    "vuln_type": "Flash Loan Vulnerability",
+    "vulnerable_code": "/* ACCOUNTS_STRUCT: FlashRepayReserveLiquidity */\n#[derive (Accounts)] pub struct FlashRepayReserveLiquidity < 'info> { pub user_transfer_authority : Signer<'info> , #[doc = \" CHECK: Verified through create_program_address, unused needed for `FlashBorrowReserveLiquidity`\"] #[account (seeds = [seeds :: LENDING_MARKET_AUTH , lending_market . key () . as_ref ()] , bump = lending_market . load () ?. bump_seed as u8 ,)] pub lending_market_authority : AccountInfo<'info> , pub lending_market : AccountLoader<'info, LendingMarket > , #[account (mut, has_one = lending_market)] pub reserve : AccountLoader<'info, Reserve > , #[account (address = reserve . load () ?. liquidity . mint_pubkey , mint :: token_program = token_program ,)] pub reserve_liquidity_mint : Box<InterfaceAccount<'info, Mint> > , #[account (mut, address = reserve . load () ?. liquidity . supply_vault ,)] pub reserve_destination_liquidity : Box<InterfaceAccount<'info, TokenAccount> > , #[account (mut)] pub user_source_liquidity : Box<InterfaceAccount<'info, TokenAccount> > , #[account (mut, address = reserve . load () ?. liquidity . fee_vault)] pub reserve_liquidity_fee_receiver : Box<InterfaceAccount<'info, TokenAccount> > , #[account (mut)] pub referrer_token_state : Option<AccountLoader<'info, ReferrerTokenState > > , #[account (mut)] pub referrer_account : Option<AccountInfo<'info> > , #[doc = \" CHECK: fixed address\"] #[account (address = sysvar :: instructions :: ID)] pub sysvar_info : AccountInfo<'info> , pub token_program : Interface<'info, TokenInterface > , }\n/* HANDLER: */\npub fn process (ctx : Context<FlashRepayReserveLiquidity > , liquidity_amount : u64 , borrow_instruction_index : u8 ,) -> Result<() > { lending_checks :: flash_repay_reserve_liquidity_checks (& ctx) ? ; let reserve = & mut ctx . accounts . reserve . load_mut () ? ; let lending_market = & ctx . accounts . lending_market . load () ? ; let initial_reserve_token_balance = token_interface :: accessor :: amount (& ctx . accounts . reserve_destination_liquidity . to_account_info () ,) ? ; let initial_reserve_available_liquidity = reserve . liquidity . available_amount ; flash_ixs :: flash_repay_checks (& ctx , borrow_instruction_index , liquidity_amount) ? ; let referrer_account = & ctx . accounts . referrer_account ; let referrer_token_state_loader = if referrer_account . is_some () { match & ctx . accounts . referrer_token_state { Some (referrer_token_state_loader) => { let referrer_token_state = & mut referrer_token_state_loader . load_mut () ? ; validate_referrer_token_state (& crate :: ID , referrer_token_state , referrer_token_state_loader . key () , reserve . liquidity . mint_pubkey , referrer_account . as_ref () . unwrap () . key () , ctx . accounts . reserve . key () ,) ? ; Some (referrer_token_state_loader) } None => { msg ! (\"No referrer account provided\") ; None } } } else { None } ; let (flash_loan_amount_with_referrer_fee , reserve_origination_fee) = lending_operations :: flash_repay_reserve_liquidity (lending_market , reserve , liquidity_amount , u64 :: try_from (Clock :: get () ? . unix_timestamp) . unwrap () , referrer_token_state_loader ,) ? ; token_transfer :: repay_obligation_liquidity_transfer (ctx . accounts . token_program . to_account_info () , ctx . accounts . reserve_liquidity_mint . to_account_info () , ctx . accounts . user_source_liquidity . to_account_info () , ctx . accounts . reserve_destination_liquidity . to_account_info () , ctx . accounts . user_transfer_authority . to_account_info () , flash_loan_amount_with_referrer_fee , ctx . accounts . reserve_liquidity_mint . decimals ,) ? ; if reserve_origination_fee > 0 { token_transfer :: pay_borrowing_fees_transfer (ctx . accounts . token_program . to_account_info () , ctx . accounts . reserve_liquidity_mint . to_account_info () , ctx . accounts . user_source_liquidity . to_account_info () , ctx . accounts . reserve_liquidity_fee_receiver . to_account_info () , ctx . accounts . user_transfer_authority . to_account_info () , reserve_origination_fee , ctx . accounts . reserve_liquidity_mint . decimals ,) ? ; } lending_checks :: post_transfer_vault_balance_liquidity_reserve_checks (token_interface :: accessor :: amount (& ctx . accounts . reserve_destination_liquidity . to_account_info () ,) . unwrap () , reserve . liquidity . available_amount , initial_reserve_token_balance , initial_reserve_available_liquidity , LendingAction :: Additive (flash_loan_amount_with_referrer_fee) ,) ? ; Ok (()) }"
+  },
+  {
+    "attack_scenario": "",
+    "category": "Type Safety",
+    "confidence": 70,
+    "cwe": "CWE-345",
+    "description": "Raw `AccountInfo<'info>` field 'placeholder_user_destination_collateral' in 'withdraw_obligation_collateral_and_redeem_reserve_collateral' has no `/// CHECK:` documentation and no Anchor constraints. Anchor will not validate the account type, owner, or data layout — any account can be substituted. This is the primary vector for account confusion attacks (Cashio $48M exploit, Wormhole $320M exploit). [found in 5 locations; also in: handler_init_referrer_token_state.rs:init_referrer_token_state, handler_flash_repay_reserve_liquidity.rs:flash_repay_reserve_liquidity, handler_flash_borrow_reserve_liquidity.rs:flash_borrow_reserve_liquidity, handler_deposit_reserve_liquidity_and_obligation_collateral.rs:deposit_reserve_liquidity_and_obligation_collateral]",
+    "function_name": "withdraw_obligation_collateral_and_redeem_reserve_collateral",
+    "id": "SOL-076",
+    "line_number": 199,
+    "location": "handlers/handler_withdraw_obligation_collateral_and_redeem_reserve_collateral.rs",
+    "poc": {
+      "attack_steps": [
+        {
+          "action_type": "Setup",
+          "code_snippet": "198: \n199:     pub placeholder_user_destination_collateral: Option<AccountInfo<'info>>,\n200: ",
+          "description": "Analyze vulnerable function: withdraw_obligation_collateral_and_redeem_reserve_collateral",
+          "step_number": 1
+        },
+        {
+          "action_type": "Transaction",
+          "code_snippet": null,
+          "description": "Construct malicious transaction",
+          "step_number": 2
+        },
+        {
+          "action_type": "Exploitation",
+          "code_snippet": null,
+          "description": "Execute exploit and extract value",
+          "step_number": 3
+        }
+      ],
+      "difficulty": "Trivial",
+      "economic_impact": "CRITICAL - Severe financial impact",
+      "expected_outcome": "Vulnerability exploited: Raw `AccountInfo<'info>` field 'placeholder_user_destination_collateral' in 'withdraw_obligation_collateral_and_redeem_reserve_collateral' has no `/// CHECK:` documentation and no Anchor constraints. Anchor will not validate the account type, owner, or data layout — any account can be substituted. This is the primary vector for account confusion attacks (Cashio $48M exploit, Wormhole $320M exploit). [found in 5 locations; also in: handler_init_referrer_token_state.rs:init_referrer_token_state, handler_flash_repay_reserve_liquidity.rs:flash_repay_reserve_liquidity, handler_flash_borrow_reserve_liquidity.rs:flash_borrow_reserve_liquidity, handler_deposit_reserve_liquidity_and_obligation_collateral.rs:deposit_reserve_liquidity_and_obligation_collateral]",
+      "mitigations": [
+        ""
+      ],
+      "prerequisites": [
+        "Access to handlers/handler_withdraw_obligation_collateral_and_redeem_reserve_collateral.rs"
+      ],
+      "rust_poc": null,
+      "scenario_name": "SOL-076: Account Type Confusion",
+      "typescript_poc": null,
+      "vulnerability_id": "SOL-076"
+    },
+    "prevention": "",
+    "real_world_incident": null,
+    "secure_fix": "Replace `AccountInfo<'info>` with a typed Anchor wrapper:\n• `Account<'info, MyData>` — validates owner + deserializes data\n• `Program<'info, MyProgram>` — validates program ID\n• `Signer<'info>` — validates is_signer flag\n• `SystemAccount<'info>` — validates System Program ownership\nIf raw access is truly needed, add `/// CHECK: <justification>` documenting why this is safe.",
+    "severity": 5,
+    "severity_label": "Critical",
+    "simulation": {
+      "rpc": "https://api.devnet.solana.com",
+      "simulate_only": true,
+      "status": "simulated",
+      "summary": "Simulated AccountConfusion exploit for SOL-076 (Account Type Confusion). Config: RPC=https://api.devnet.solana.com, simulate_only=true, compute_budget=200000"
+    },
+    "vuln_type": "Account Type Confusion",
+    "vulnerable_code": "198: \n199:     pub placeholder_user_destination_collateral: Option<AccountInfo<'info>>,\n200: "
+  },
+  {
+    "attack_scenario": "Attacker reads the authority pubkey from the program's state, then passes that pubkey as the authority account without signing the transaction with the corresponding private key.",
+    "category": "Authorization",
+    "confidence": 63,
+    "cwe": "CWE-862",
+    "description": "Account `lending_market_authority` in `SocializeLossV2` has an authority-like name but is not marked as a signer and no companion signer validates it. An attacker can pass any account as the authority without proving ownership. [found in 8 locations; also in: handler_repay_obligation_liquidity.rs:RepayObligationLiquidityV2, handler_refresh_obligation_farms_for_reserve.rs:RefreshObligationFarmsForReserveBase, handler_init_obligation_farms_for_reserve.rs:InitObligationFarmsForReserve, handler_init_lending_market.rs:InitLendingMarket, handler_init_farms_for_reserve.rs:InitFarmsForReserve, handler_fill_borrow_order.rs:FillBorrowOrderAccounts, handler_deposit_obligation_collateral.rs:DepositObligationCollateralV2]",
+    "function_name": "SocializeLossV2",
+    "id": "SOL-ALIAS-05",
+    "line_number": 113,
+    "location": "handler_socialize_loss.rs",
+    "poc": {
+      "attack_steps": [
+        {
+          "action_type": "Setup",
+          "code_snippet": "pub lending_market_authority: AccountInfo<'info>",
+          "description": "Analyze vulnerable function: SocializeLossV2",
+          "step_number": 1
+        },
+        {
+          "action_type": "Transaction",
+          "code_snippet": null,
+          "description": "Construct malicious transaction",
+          "step_number": 2
+        },
+        {
+          "action_type": "Exploitation",
+          "code_snippet": null,
+          "description": "Execute exploit and extract value",
+          "step_number": 3
+        }
+      ],
+      "difficulty": "Trivial",
+      "economic_impact": "CRITICAL - Severe financial impact",
+      "expected_outcome": "Vulnerability exploited: Account `lending_market_authority` in `SocializeLossV2` has an authority-like name but is not marked as a signer and no companion signer validates it. An attacker can pass any account as the authority without proving ownership. [found in 8 locations; also in: handler_repay_obligation_liquidity.rs:RepayObligationLiquidityV2, handler_refresh_obligation_farms_for_reserve.rs:RefreshObligationFarmsForReserveBase, handler_init_obligation_farms_for_reserve.rs:InitObligationFarmsForReserve, handler_init_lending_market.rs:InitLendingMarket, handler_init_farms_for_reserve.rs:InitFarmsForReserve, handler_fill_borrow_order.rs:FillBorrowOrderAccounts, handler_deposit_obligation_collateral.rs:DepositObligationCollateralV2]",
+      "mitigations": [
+        "Always require signer verification for authority accounts."
+      ],
+      "prerequisites": [
+        "Access to handler_socialize_loss.rs"
+      ],
+      "rust_poc": null,
+      "scenario_name": "SOL-ALIAS-05: Authority Account Without Signer Check",
+      "typescript_poc": null,
+      "vulnerability_id": "SOL-ALIAS-05"
+    },
+    "prevention": "Always require signer verification for authority accounts.",
+    "real_world_incident": {
+      "date": "2022-02-02",
+      "loss": "$320M",
+      "project": "Wormhole Bridge"
+    },
+    "secure_fix": "Add `Signer<'info>` type or `#[account(signer)]` constraint.",
+    "severity": 5,
+    "severity_label": "CRITICAL",
+    "simulation": {
+      "rpc": "https://api.devnet.solana.com",
+      "simulate_only": true,
+      "status": "simulated",
+      "summary": "Simulated AccountConfusion exploit for SOL-ALIAS-05 (Authority Account Without Signer Check). Config: RPC=https://api.devnet.solana.com, simulate_only=true, compute_budget=200000"
+    },
+    "vuln_type": "Authority Account Without Signer Check",
+    "vulnerable_code": "pub lending_market_authority: AccountInfo<'info>"
+  },
+  {
+    "attack_scenario": "User deposits Token2022 tokens with PermanentDelegate into a vault. The mint authority uses PermanentDelegate to transfer tokens out of the vault without the program's consent, draining user deposits.",
+    "category": "Token2022 Security",
+    "confidence": 60,
+    "cwe": "CWE-732",
+    "description": "Token2022's PermanentDelegate extension allows a designated authority to transfer or burn tokens from ANY account holding that mint, without holder approval. Programs must check for this extension before accepting deposits.",
+    "function_name": "process",
+    "id": "SOL-057",
+    "line_number": 17,
+    "location": "handler_withdraw_protocol_fees.rs",
+    "poc": {
+      "attack_steps": [
+        {
+          "action_type": "Setup",
+          "code_snippet": "/* ACCOUNTS_STRUCT: WithdrawProtocolFees */\n#[derive (Accounts)] pub struct WithdrawProtocolFees < 'info> { #[account (seeds = [seeds :: GLOBAL_CONFIG_STATE] , bump ,)] global_config : AccountLoader<'info, GlobalConfig > , #[account ()] pub lending_market : AccountLoader<'info, LendingMarket > , #[account (has_one = lending_market)] pub reserve : AccountLoader<'info, Reserve > , #[account (address = reserve . load () ?. liquidity . mint_pubkey , mint :: token_program = token_program ,)] pub reserve_liquidity_mint : Box<InterfaceAccount<'info, Mint> > , #[account (seeds = [seeds :: LENDING_MARKET_AUTH , lending_market . key () . as_ref ()] , bump = lending_market . load () ?. bump_seed as u8 ,)] #[doc = \" CHECK: PDA signer, checked with the provided seeds\"] pub lending_market_authority : AccountInfo<'info> , #[account (mut, address = reserve . load () ?. liquidity . fee_vault , token :: authority = lending_market_authority ,)] pub fee_vault : Box<InterfaceAccount<'info, TokenAccount> > , #[account (mut, address = get_associated_token_address_with_program_id (& global_config . load () ?. fee_collector , & reserve_liquidity_mint . key () , & token_program . key () ,) , token :: mint = reserve_liquidity_mint , token :: authority = global_config . load () ?. fee_collector , constraint = fee_collector_ata . delegate == COption :: None ,)] pub fee_collector_ata : Box<InterfaceAccount<'info, TokenAccount> > , pub token_program : Interface<'info, TokenInterface > , }\n/* HANDLER: */\npub fn process (ctx : Context<WithdrawProtocolFees > , amount : u64) -> Result<() > { constraints :: token_2022 :: validate_liquidity_token_extensions (& ctx . accounts . reserve_liquidity_mint . to_account_info () , & ctx . accounts . fee_vault . to_account_info () ,) ? ; let market = ctx . accounts . lending_market . load () ? ; let lending_market_key = ctx . accounts . lending_market . key () ; let amount = amount . min (ctx . accounts . fee_vault . amount) ; let authority_signer_seeds = gen_signer_seeds ! (lending_market_key , market . bump_seed as u8) ; msg ! (\"Withdrawing fees: {}\" , amount) ; token_transfer :: withdraw_fees_from_reserve (ctx . accounts . token_program . to_account_info () , ctx . accounts . reserve_liquidity_mint . to_account_info () , ctx . accounts . fee_vault . to_account_info () , ctx . accounts . fee_collector_ata . to_account_info () , ctx . accounts . lending_market_authority . to_account_info () , authority_signer_seeds , amount , ctx . accounts . reserve_liquidity_mint . decimals ,) ? ; Ok (()) }",
+          "description": "Analyze vulnerable function: process",
+          "step_number": 1
+        },
+        {
+          "action_type": "Transaction",
+          "code_snippet": null,
+          "description": "Construct malicious transaction",
+          "step_number": 2
+        },
+        {
+          "action_type": "Exploitation",
+          "code_snippet": null,
+          "description": "Execute exploit and extract value",
+          "step_number": 3
+        }
+      ],
+      "difficulty": "Easy",
+      "economic_impact": "HIGH - Significant financial impact",
+      "expected_outcome": "Vulnerability exploited: Token2022's PermanentDelegate extension allows a designated authority to transfer or burn tokens from ANY account holding that mint, without holder approval. Programs must check for this extension before accepting deposits.",
+      "mitigations": [
+        "Audit all Token2022 mint extensions before accepting deposits. Reject mints with PermanentDelegate unless trust is established."
+      ],
+      "prerequisites": [
+        "Access to handler_withdraw_protocol_fees.rs"
+      ],
+      "rust_poc": null,
+      "scenario_name": "SOL-057: Permanent Delegate Exposure",
+      "typescript_poc": null,
+      "vulnerability_id": "SOL-057"
+    },
+    "prevention": "Audit all Token2022 mint extensions before accepting deposits. Reject mints with PermanentDelegate unless trust is established.",
+    "real_world_incident": null,
+    "secure_fix": "Check for PermanentDelegate extension on mint accounts: `get_permanent_delegate(&mint_data)`. Reject or warn on mints with this extension unless explicitly whitelisted.",
+    "severity": 4,
+    "severity_label": "HIGH",
+    "simulation": {
+      "rpc": "https://api.devnet.solana.com",
+      "simulate_only": true,
+      "status": "simulated",
+      "summary": "Simulated AccountConfusion exploit for SOL-057 (Permanent Delegate Exposure). Config: RPC=https://api.devnet.solana.com, simulate_only=true, compute_budget=200000"
+    },
+    "vuln_type": "Permanent Delegate Exposure",
+    "vulnerable_code": "/* ACCOUNTS_STRUCT: WithdrawProtocolFees */\n#[derive (Accounts)] pub struct WithdrawProtocolFees < 'info> { #[account (seeds = [seeds :: GLOBAL_CONFIG_STATE] , bump ,)] global_config : AccountLoader<'info, GlobalConfig > , #[account ()] pub lending_market : AccountLoader<'info, LendingMarket > , #[account (has_one = lending_market)] pub reserve : AccountLoader<'info, Reserve > , #[account (address = reserve . load () ?. liquidity . mint_pubkey , mint :: token_program = token_program ,)] pub reserve_liquidity_mint : Box<InterfaceAccount<'info, Mint> > , #[account (seeds = [seeds :: LENDING_MARKET_AUTH , lending_market . key () . as_ref ()] , bump = lending_market . load () ?. bump_seed as u8 ,)] #[doc = \" CHECK: PDA signer, checked with the provided seeds\"] pub lending_market_authority : AccountInfo<'info> , #[account (mut, address = reserve . load () ?. liquidity . fee_vault , token :: authority = lending_market_authority ,)] pub fee_vault : Box<InterfaceAccount<'info, TokenAccount> > , #[account (mut, address = get_associated_token_address_with_program_id (& global_config . load () ?. fee_collector , & reserve_liquidity_mint . key () , & token_program . key () ,) , token :: mint = reserve_liquidity_mint , token :: authority = global_config . load () ?. fee_collector , constraint = fee_collector_ata . delegate == COption :: None ,)] pub fee_collector_ata : Box<InterfaceAccount<'info, TokenAccount> > , pub token_program : Interface<'info, TokenInterface > , }\n/* HANDLER: */\npub fn process (ctx : Context<WithdrawProtocolFees > , amount : u64) -> Result<() > { constraints :: token_2022 :: validate_liquidity_token_extensions (& ctx . accounts . reserve_liquidity_mint . to_account_info () , & ctx . accounts . fee_vault . to_account_info () ,) ? ; let market = ctx . accounts . lending_market . load () ? ; let lending_market_key = ctx . accounts . lending_market . key () ; let amount = amount . min (ctx . accounts . fee_vault . amount) ; let authority_signer_seeds = gen_signer_seeds ! (lending_market_key , market . bump_seed as u8) ; msg ! (\"Withdrawing fees: {}\" , amount) ; token_transfer :: withdraw_fees_from_reserve (ctx . accounts . token_program . to_account_info () , ctx . accounts . reserve_liquidity_mint . to_account_info () , ctx . accounts . fee_vault . to_account_info () , ctx . accounts . fee_collector_ata . to_account_info () , ctx . accounts . lending_market_authority . to_account_info () , authority_signer_seeds , amount , ctx . accounts . reserve_liquidity_mint . decimals ,) ? ; Ok (()) }"
+  },
+  {
+    "attack_scenario": "Program reads remaining_accounts[0] as a user's token account without checking owner. Attacker passes a token account they own, redirecting funds or spoofing identity.",
+    "category": "Account Validation",
+    "confidence": 60,
+    "cwe": "CWE-20",
+    "description": "The context uses `remaining_accounts` without validating the accounts' ownership, signer status, or expected keys. These accounts bypass Anchor's automatic validation, so ANY account can be passed. [found in 10 locations; also in: handler_request_elevation_group.rs:process, handler_repay_obligation_liquidity.rs:process_v1, handler_repay_and_withdraw_redeem.rs:process, handler_refresh_reserves_batch.rs:process, handler_refresh_obligation_farms_for_reserve.rs:process_refresh_obligation_farms_for_reserve, handler_refresh_obligation.rs:process, handler_liquidate_obligation_and_redeem_reserve_collateral.rs:process_v1, handler_fill_borrow_order.rs:process_impl, handler_borrow_obligation_liquidity.rs:process_v1]",
+    "function_name": "process_v1",
+    "id": "SOL-063",
+    "line_number": 39,
+    "location": "handler_socialize_loss.rs",
+    "poc": {
+      "attack_steps": [
+        {
+          "action_type": "Setup",
+          "code_snippet": "/* ACCOUNTS_STRUCT: SocializeLoss */\n#[derive (Accounts)] pub struct SocializeLoss < 'info> { pub lending_market_owner : Signer<'info> , #[account (mut, has_one = lending_market)] pub obligation : AccountLoader<'info, Obligation > , #[account (has_one = lending_market_owner)] pub lending_market : AccountLoader<'info, LendingMarket > , #[account (mut, has_one = lending_market)] pub reserve : AccountLoader<'info, Reserve > , #[doc = \" CHECK: Sysvar Instruction allowing introspection, fixed address\"] #[account (address = SysInstructions :: id ())] pub instruction_sysvar_account : AccountInfo<'info> , }\n/* HANDLER: */\npub fn process_v1 (ctx : Context<SocializeLoss > , liquidity_amount : u64) -> Result<() > { check_refresh_ixs ! (ctx . accounts , ctx . accounts . reserve , ReserveFarmKind :: Debt) ; process_impl (ctx . accounts , ctx . remaining_accounts , liquidity_amount) }",
+          "description": "Analyze vulnerable function: process_v1",
+          "step_number": 1
+        },
+        {
+          "action_type": "Transaction",
+          "code_snippet": null,
+          "description": "Construct malicious transaction",
+          "step_number": 2
+        },
+        {
+          "action_type": "Exploitation",
+          "code_snippet": null,
+          "description": "Execute exploit and extract value",
+          "step_number": 3
+        }
+      ],
+      "difficulty": "Easy",
+      "economic_impact": "HIGH - Significant financial impact",
+      "expected_outcome": "Vulnerability exploited: The context uses `remaining_accounts` without validating the accounts' ownership, signer status, or expected keys. These accounts bypass Anchor's automatic validation, so ANY account can be passed. [found in 10 locations; also in: handler_request_elevation_group.rs:process, handler_repay_obligation_liquidity.rs:process_v1, handler_repay_and_withdraw_redeem.rs:process, handler_refresh_reserves_batch.rs:process, handler_refresh_obligation_farms_for_reserve.rs:process_refresh_obligation_farms_for_reserve, handler_refresh_obligation.rs:process, handler_liquidate_obligation_and_redeem_reserve_collateral.rs:process_v1, handler_fill_borrow_order.rs:process_impl, handler_borrow_obligation_liquidity.rs:process_v1]",
+      "mitigations": [
+        "Minimize remaining_accounts usage. When required, validate each account's owner, key, and writable/signer constraints explicitly."
+      ],
+      "prerequisites": [
+        "Access to handler_socialize_loss.rs"
+      ],
+      "rust_poc": null,
+      "scenario_name": "SOL-063: Unvalidated remaining_accounts",
+      "typescript_poc": null,
+      "vulnerability_id": "SOL-063"
+    },
+    "prevention": "Minimize remaining_accounts usage. When required, validate each account's owner, key, and writable/signer constraints explicitly.",
+    "real_world_incident": null,
+    "secure_fix": "Validate each remaining_account: check owner, key, signer status. Prefer typed accounts in the Accounts struct over remaining_accounts.",
+    "severity": 4,
+    "severity_label": "HIGH",
+    "simulation": {
+      "rpc": "https://api.devnet.solana.com",
+      "simulate_only": true,
+      "status": "simulated",
+      "summary": "Simulated AccountConfusion exploit for SOL-063 (Unvalidated remaining_accounts). Config: RPC=https://api.devnet.solana.com, simulate_only=true, compute_budget=200000"
+    },
+    "vuln_type": "Unvalidated remaining_accounts",
+    "vulnerable_code": "/* ACCOUNTS_STRUCT: SocializeLoss */\n#[derive (Accounts)] pub struct SocializeLoss < 'info> { pub lending_market_owner : Signer<'info> , #[account (mut, has_one = lending_market)] pub obligation : AccountLoader<'info, Obligation > , #[account (has_one = lending_market_owner)] pub lending_market : AccountLoader<'info, LendingMarket > , #[account (mut, has_one = lending_market)] pub reserve : AccountLoader<'info, Reserve > , #[doc = \" CHECK: Sysvar Instruction allowing introspection, fixed address\"] #[account (address = SysInstructions :: id ())] pub instruction_sysvar_account : AccountInfo<'info> , }\n/* HANDLER: */\npub fn process_v1 (ctx : Context<SocializeLoss > , liquidity_amount : u64) -> Result<() > { check_refresh_ixs ! (ctx . accounts , ctx . accounts . reserve , ReserveFarmKind :: Debt) ; process_impl (ctx . accounts , ctx . remaining_accounts , liquidity_amount) }"
+  },
+  {
+    "attack_scenario": "",
+    "category": "Input Validation",
+    "confidence": 60,
+    "cwe": "CWE-20",
+    "description": "`remaining_accounts` accessed at line 16 without visible validation. Remaining accounts bypass Anchor's automatic validation — an attacker can inject arbitrary accounts to manipulate instruction logic, substitute token accounts, or inject malicious program IDs for CPI.",
+    "function_name": "check_remaining_accounts<T>",
+    "id": "SOL-072",
+    "line_number": 16,
+    "location": "utils/constraints.rs",
+    "poc": {
+      "attack_steps": [
+        {
+          "action_type": "Setup",
+          "code_snippet": "pub fn check_remaining_accounts<T>(ctx: &Context<T>) -> Result<()>",
+          "description": "Analyze vulnerable function: check_remaining_accounts<T>",
+          "step_number": 1
+        },
+        {
+          "action_type": "Transaction",
+          "code_snippet": null,
+          "description": "Construct malicious transaction",
+          "step_number": 2
+        },
+        {
+          "action_type": "Exploitation",
+          "code_snippet": null,
+          "description": "Execute exploit and extract value",
+          "step_number": 3
+        }
+      ],
+      "difficulty": "Easy",
+      "economic_impact": "HIGH - Significant financial impact",
+      "expected_outcome": "Vulnerability exploited: `remaining_accounts` accessed at line 16 without visible validation. Remaining accounts bypass Anchor's automatic validation — an attacker can inject arbitrary accounts to manipulate instruction logic, substitute token accounts, or inject malicious program IDs for CPI.",
+      "mitigations": [
+        ""
+      ],
+      "prerequisites": [
+        "Access to utils/constraints.rs"
+      ],
+      "rust_poc": null,
+      "scenario_name": "SOL-072: Unchecked Remaining Accounts",
+      "typescript_poc": null,
+      "vulnerability_id": "SOL-072"
+    },
+    "prevention": "",
+    "real_world_incident": null,
+    "secure_fix": "Validate each remaining account before use:\n• Check owner: `require!(acc.owner == &expected_program_id)`\n• Check key: `require_keys_eq!(acc.key(), expected_key)`\n• Deserialize with type check: `Account::<TokenAccount>::try_from(acc)?`\n• Or move accounts into the Anchor `#[derive(Accounts)]` struct",
+    "severity": 4,
+    "severity_label": "High",
+    "simulation": {
+      "rpc": "https://api.devnet.solana.com",
+      "simulate_only": true,
+      "status": "simulated",
+      "summary": "Simulated AccountConfusion exploit for SOL-072 (Unchecked Remaining Accounts). Config: RPC=https://api.devnet.solana.com, simulate_only=true, compute_budget=200000"
+    },
+    "vuln_type": "Unchecked Remaining Accounts",
+    "vulnerable_code": "pub fn check_remaining_accounts<T>(ctx: &Context<T>) -> Result<()>"
+  },
+  {
+    "attack_scenario": "Attacker creates an account with crafted data that mimics the expected layout. Without discriminator checking, the program interprets this data as valid, leading to unauthorized operations.",
+    "category": "Account Safety",
+    "confidence": 58,
+    "cwe": "CWE-704",
+    "description": "Account `placeholder_user_destination_collateral` in `WithdrawObligationCollateralAndRedeemReserveCollateral` uses raw `AccountInfo` which provides no type safety or discriminator checking. The account data can contain anything — including data from a completely different program. [found in 9 locations; also in: handler_refresh_reserve.rs:RefreshReserve, handler_refresh_obligation_farms_for_reserve.rs:RefreshObligationFarmsForReserveBase, handler_init_referrer_token_state.rs:InitReferrerTokenState, handler_init_obligation_farms_for_reserve.rs:InitObligationFarmsForReserve, handler_init_farms_for_reserve.rs:InitFarmsForReserve, handler_flash_repay_reserve_liquidity.rs:FlashRepayReserveLiquidity, handler_flash_borrow_reserve_liquidity.rs:FlashBorrowReserveLiquidity, handler_deposit_reserve_liquidity_and_obligation_collateral.rs:DepositReserveLiquidityAndObligationCollateral]",
+    "function_name": "WithdrawObligationCollateralAndRedeemReserveCollateral",
+    "id": "SOL-ALIAS-02",
+    "line_number": 199,
+    "location": "handler_withdraw_obligation_collateral_and_redeem_reserve_collateral.rs",
+    "poc": {
+      "attack_steps": [
+        {
+          "action_type": "Setup",
+          "code_snippet": "pub placeholder_user_destination_collateral: AccountInfo<'info>",
+          "description": "Analyze vulnerable function: WithdrawObligationCollateralAndRedeemReserveCollateral",
+          "step_number": 1
+        },
+        {
+          "action_type": "Transaction",
+          "code_snippet": null,
+          "description": "Construct malicious transaction",
+          "step_number": 2
+        },
+        {
+          "action_type": "Exploitation",
+          "code_snippet": null,
+          "description": "Execute exploit and extract value",
+          "step_number": 3
+        }
+      ],
+      "difficulty": "Easy",
+      "economic_impact": "HIGH - Significant financial impact",
+      "expected_outcome": "Vulnerability exploited: Account `placeholder_user_destination_collateral` in `WithdrawObligationCollateralAndRedeemReserveCollateral` uses raw `AccountInfo` which provides no type safety or discriminator checking. The account data can contain anything — including data from a completely different program. [found in 9 locations; also in: handler_refresh_reserve.rs:RefreshReserve, handler_refresh_obligation_farms_for_reserve.rs:RefreshObligationFarmsForReserveBase, handler_init_referrer_token_state.rs:InitReferrerTokenState, handler_init_obligation_farms_for_reserve.rs:InitObligationFarmsForReserve, handler_init_farms_for_reserve.rs:InitFarmsForReserve, handler_flash_repay_reserve_liquidity.rs:FlashRepayReserveLiquidity, handler_flash_borrow_reserve_liquidity.rs:FlashBorrowReserveLiquidity, handler_deposit_reserve_liquidity_and_obligation_collateral.rs:DepositReserveLiquidityAndObligationCollateral]",
+      "mitigations": [
+        "Always use typed accounts with discriminator validation."
+      ],
+      "prerequisites": [
+        "Access to handler_withdraw_obligation_collateral_and_redeem_reserve_collateral.rs"
+      ],
+      "rust_poc": null,
+      "scenario_name": "SOL-ALIAS-02: Raw AccountInfo Without Type Safety",
+      "typescript_poc": null,
+      "vulnerability_id": "SOL-ALIAS-02"
+    },
+    "prevention": "Always use typed accounts with discriminator validation.",
+    "real_world_incident": {
+      "date": "2022-02-02",
+      "loss": "$320M",
+      "project": "Wormhole Bridge"
+    },
+    "secure_fix": "Replace `AccountInfo` with a typed Anchor account: `Account<'info, YourType>` which automatically validates the discriminator and owner.",
+    "severity": 4,
+    "severity_label": "HIGH",
+    "simulation": {
+      "rpc": "https://api.devnet.solana.com",
+      "simulate_only": true,
+      "status": "simulated",
+      "summary": "Simulated AccountConfusion exploit for SOL-ALIAS-02 (Raw AccountInfo Without Type Safety). Config: RPC=https://api.devnet.solana.com, simulate_only=true, compute_budget=200000"
+    },
+    "vuln_type": "Raw AccountInfo Without Type Safety",
+    "vulnerable_code": "pub placeholder_user_destination_collateral: AccountInfo<'info>"
+  }
+]

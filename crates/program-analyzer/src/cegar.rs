@@ -35,7 +35,7 @@
 //! - Henzinger et al. "Lazy Abstraction" (POPL 2002)
 
 use std::collections::{HashMap, HashSet, VecDeque};
-use z3::ast::{Ast, Bool, Int};
+use z3::ast::{Bool, Int};
 use z3::{Config, Context, SatResult, Solver};
 
 /// A predicate used for abstraction.
@@ -376,7 +376,7 @@ impl CegarEngine {
     /// Compute reachable abstract states via BFS.
     fn compute_reachable(
         &self,
-        states: &[AbstractState],
+        _states: &[AbstractState],
         transitions: &[(usize, usize, String)],
     ) -> HashSet<usize> {
         let mut reachable = HashSet::new();
@@ -428,7 +428,7 @@ impl CegarEngine {
     /// Check if an abstract counterexample is feasible.
     fn check_feasibility(
         &self,
-        cex: &CounterexampleTrace,
+        _cex: &CounterexampleTrace,
         property: &SafetyProperty,
     ) -> FeasibilityResult {
         let cfg = Config::new();

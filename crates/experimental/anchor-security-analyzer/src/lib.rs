@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! # Anchor Framework Security Analyzer
 //!
 //! Static analysis for Anchor-based Solana programs. Checks constraint correctness,

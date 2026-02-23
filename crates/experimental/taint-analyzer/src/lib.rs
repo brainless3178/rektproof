@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! Taint Analysis Engine for Solana Programs
 //!
 //! Tracks how untrusted data (sources) flows to sensitive operations (sinks).

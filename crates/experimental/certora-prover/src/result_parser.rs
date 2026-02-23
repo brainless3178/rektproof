@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use tracing::debug;
 
 /// Parses Certora Prover output into structured results.
-#[allow(dead_code)]
+
 pub struct CertoraResultParser {
     rule_result_re: Regex,
     counterexample_re: Regex,

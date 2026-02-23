@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! # Cargo-Geiger Analyzer for Solana Programs
 //!
 //! Detects and analyzes unsafe Rust code blocks in Solana smart contracts.

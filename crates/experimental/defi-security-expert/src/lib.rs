@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! DeFi Security Expert — Comprehensive DeFi Vulnerability Knowledge Base
 //!
 //! Provides defense strategies, secure Rust patterns, and checklists for

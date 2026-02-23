@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! Secure Code Generator
 //!
 //! Generates secure Solana program code patterns and fixes

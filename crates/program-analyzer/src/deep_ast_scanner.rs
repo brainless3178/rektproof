@@ -157,11 +157,23 @@ impl<'a> DeepScanner<'a> {
             let line = span_line(&field.ty);
 
             let is_authority = authority_names.iter().any(|n| fname.contains(n));
-            let is_raw_account_info = ftype.contains("AccountInfo") && !ftype.contains("UncheckedAccount");
+            let is_raw_account_info = ftype.contains("AccountInfo");
             let has_signer_attr = field_has_attr(field, "account")
                 && field_attr_contains(field, "signer");
 
-            if is_authority && is_raw_account_info && !has_signer_attr {
+            // PDA authorities use seeds+bump for validation, not signing.
+            // They are intentionally UncheckedAccount — flagging them is always FP.
+            let is_pda_authority = field_has_attr(field, "account")
+                && field_attr_contains(field, "seeds")
+                && field_attr_contains(field, "bump");
+
+            // CHECK doc comment = developer explicitly acknowledged the safety
+            let has_check_doc = field.attrs.iter().any(|a| {
+                a.meta.to_token_stream().to_string().contains("CHECK")
+            });
+
+            if is_authority && is_raw_account_info && !has_signer_attr
+                && !is_pda_authority && !has_check_doc {
                 let code_snippet = self.get_line(line);
                 self.emit(VulnerabilityFinding {
                     category: "Authentication".into(),
@@ -435,9 +447,35 @@ impl<'a> DeepScanner<'a> {
     }
 
     /// SOL-017: Reentrancy — state write after CPI
+    ///
+    /// Only flags when the CPI target could be attacker-controlled.
+    /// Native programs (Stake, System, Token) cannot re-enter.
+    /// `invoke_signed` with PDA seeds means the program controls the CPI.
     fn check_reentrancy_pattern(&mut self, stmts: &[Stmt], fn_name: &str) {
         let mut saw_cpi = false;
         let mut cpi_line = 0usize;
+
+        // Collect full function body text to check for native program targets
+        let full_body: String = stmts.iter().map(|s| stmt_to_string(s)).collect::<Vec<_>>().join("\n");
+
+        // If the function uses validated Program<'info, T> for native programs,
+        // CPI targets cannot be substituted and cannot re-enter.
+        let has_native_program_target = full_body.contains("stake_program")
+            || full_body.contains("system_program")
+            || full_body.contains("token_program")
+            || full_body.contains("associated_token_program")
+            || full_body.contains("StakeProgram")
+            || full_body.contains("SystemProgram")
+            || full_body.contains("Token ::")
+            || full_body.contains("Token::");
+
+        // invoke_signed = PDA-controlled CPI, program is the signer
+        let uses_invoke_signed = full_body.contains("invoke_signed");
+
+        // If CPI targets are all native programs or PDA-signed, no reentrancy risk
+        if has_native_program_target && uses_invoke_signed {
+            return;
+        }
 
         for stmt in stmts {
             let code = stmt_to_string(stmt);

@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! Symbolic Execution Engine with Z3 Backend
 //!
 //! Provides formal verification capabilities by translating Solana

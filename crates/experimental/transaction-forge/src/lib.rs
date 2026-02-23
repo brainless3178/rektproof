@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! Transaction Forge - Exploit Transaction Generation
 //!
 //! Converts symbolic exploit proofs into real, executable Solana transactions.

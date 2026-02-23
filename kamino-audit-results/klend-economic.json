@@ -1,0 +1,107 @@
+
+  +  Running DeFi economic invariant verification on: /tmp/kamino-scan/klend/programs/klend/src
+  X Conservation: Invariant violated: counterexample found: {"model": "total_shares -> 0\ntotal_assets -> 0\nuser_withdrawals -> 0\nfees -> 0\nuser_deposits -> 1\n"}
+    Counterexample: {"model": "total_shares -> 0\ntotal_assets -> 0\nuser_withdrawals -> 0\nfees -> 0\nuser_deposits -> 1\n"}
+  ok SharePriceMonotonicity: Invariant verified: no violation is possible
+  X NoValueExtraction: Invariant violated: counterexample found: {"model": "user_withdrawal -> 11\nuser_deposit -> 1\nwithdraw_shares -> 1\nwithdraw_assets -> 1\ndeposit_shares -> 0\ndeposit_assets -> 0\nuser_shares -> 1\n"}
+    Counterexample: {"model": "user_withdrawal -> 11\nuser_deposit -> 1\nwithdraw_shares -> 1\nwithdraw_assets -> 1\ndeposit_shares -> 0\ndeposit_assets -> 0\nuser_shares -> 1\n"}
+  X FirstDepositProtection: Invariant violated: counterexample found: {"model": "first_shares -> 1\nsecond_deposit -> 1000\nfirst_deposit -> 1\ndonation -> 1000001000\n"}
+    Counterexample: {"model": "first_shares -> 1\nsecond_deposit -> 1000\nfirst_deposit -> 1\ndonation -> 1000001000\n"}
+  X ConstantProduct: Invariant violated: counterexample found: {"model": "fee_bps -> 66\nreserve_x_before -> 16314\nreserve_y_before -> 6139\namount_out -> 1021\nreserve_x_after -> 16344\nreserve_y_after -> 5118\namount_in -> 30\n"}
+    Counterexample: {"model": "fee_bps -> 66\nreserve_x_before -> 16314\nreserve_y_before -> 6139\namount_out -> 1021\nreserve_x_after -> 16344\nreserve_y_after -> 5118\namount_in -> 30\n"}
+  X WeightedPool: Invariant violated: counterexample found: {"model": "wy_after -> 36\nwx_after -> 17\nw_amount_out -> 60\nwx_before -> 16\nwy_before -> 96\nw_amount_in -> 1\n"}
+    Counterexample: {"model": "wy_after -> 36\nwx_after -> 17\nw_amount_out -> 60\nwx_before -> 16\nwy_before -> 96\nw_amount_in -> 1\n"}
+  X StablePool: Invariant violated: counterexample found: {"model": "sy_before -> 256\ns_amount_out -> 178\ns_amount_in -> 128\nsy_after -> 78\nsx_after -> 149\nsx_before -> 21\n"}
+    Counterexample: {"model": "sy_before -> 256\ns_amount_out -> 178\ns_amount_in -> 128\nsy_after -> 78\nsx_after -> 149\nsx_before -> 21\n"}
+  X FeeBounds: Invariant violated: counterexample found: {"model": "fee -> 1\namount -> 0\n"}
+    Counterexample: {"model": "fee -> 1\namount -> 0\n"}
+  X CollateralizationRatio: Invariant violated: counterexample found: {"model": "debt_value -> 1\ncollateral_value -> 0\n"}
+    Counterexample: {"model": "debt_value -> 1\ncollateral_value -> 0\n"}
+
+  X  Economic verification: 1 passed, 8 failed (0.25s)
+{
+  "economic_verification": [
+    {
+      "counterexample": {
+        "model": "total_shares -> 0\ntotal_assets -> 0\nuser_withdrawals -> 0\nfees -> 0\nuser_deposits -> 1\n"
+      },
+      "description": "Invariant violated: counterexample found: {\"model\": \"total_shares -> 0\\ntotal_assets -> 0\\nuser_withdrawals -> 0\\nfees -> 0\\nuser_deposits -> 1\\n\"}",
+      "invariant": "Conservation",
+      "severity": "Violated",
+      "verified": false
+    },
+    {
+      "counterexample": null,
+      "description": "Invariant verified: no violation is possible",
+      "invariant": "SharePriceMonotonicity",
+      "severity": "Proven",
+      "verified": true
+    },
+    {
+      "counterexample": {
+        "model": "user_withdrawal -> 11\nuser_deposit -> 1\nwithdraw_shares -> 1\nwithdraw_assets -> 1\ndeposit_shares -> 0\ndeposit_assets -> 0\nuser_shares -> 1\n"
+      },
+      "description": "Invariant violated: counterexample found: {\"model\": \"user_withdrawal -> 11\\nuser_deposit -> 1\\nwithdraw_shares -> 1\\nwithdraw_assets -> 1\\ndeposit_shares -> 0\\ndeposit_assets -> 0\\nuser_shares -> 1\\n\"}",
+      "invariant": "NoValueExtraction",
+      "severity": "Violated",
+      "verified": false
+    },
+    {
+      "counterexample": {
+        "model": "first_shares -> 1\nsecond_deposit -> 1000\nfirst_deposit -> 1\ndonation -> 1000001000\n"
+      },
+      "description": "Invariant violated: counterexample found: {\"model\": \"first_shares -> 1\\nsecond_deposit -> 1000\\nfirst_deposit -> 1\\ndonation -> 1000001000\\n\"}",
+      "invariant": "FirstDepositProtection",
+      "severity": "Violated",
+      "verified": false
+    },
+    {
+      "counterexample": {
+        "model": "fee_bps -> 66\nreserve_x_before -> 16314\nreserve_y_before -> 6139\namount_out -> 1021\nreserve_x_after -> 16344\nreserve_y_after -> 5118\namount_in -> 30\n"
+      },
+      "description": "Invariant violated: counterexample found: {\"model\": \"fee_bps -> 66\\nreserve_x_before -> 16314\\nreserve_y_before -> 6139\\namount_out -> 1021\\nreserve_x_after -> 16344\\nreserve_y_after -> 5118\\namount_in -> 30\\n\"}",
+      "invariant": "ConstantProduct",
+      "severity": "Violated",
+      "verified": false
+    },
+    {
+      "counterexample": {
+        "model": "wy_after -> 36\nwx_after -> 17\nw_amount_out -> 60\nwx_before -> 16\nwy_before -> 96\nw_amount_in -> 1\n"
+      },
+      "description": "Invariant violated: counterexample found: {\"model\": \"wy_after -> 36\\nwx_after -> 17\\nw_amount_out -> 60\\nwx_before -> 16\\nwy_before -> 96\\nw_amount_in -> 1\\n\"}",
+      "invariant": "WeightedPool",
+      "severity": "Violated",
+      "verified": false
+    },
+    {
+      "counterexample": {
+        "model": "sy_before -> 256\ns_amount_out -> 178\ns_amount_in -> 128\nsy_after -> 78\nsx_after -> 149\nsx_before -> 21\n"
+      },
+      "description": "Invariant violated: counterexample found: {\"model\": \"sy_before -> 256\\ns_amount_out -> 178\\ns_amount_in -> 128\\nsy_after -> 78\\nsx_after -> 149\\nsx_before -> 21\\n\"}",
+      "invariant": "StablePool",
+      "severity": "Violated",
+      "verified": false
+    },
+    {
+      "counterexample": {
+        "model": "fee -> 1\namount -> 0\n"
+      },
+      "description": "Invariant violated: counterexample found: {\"model\": \"fee -> 1\\namount -> 0\\n\"}",
+      "invariant": "FeeBounds",
+      "severity": "Violated",
+      "verified": false
+    },
+    {
+      "counterexample": {
+        "model": "debt_value -> 1\ncollateral_value -> 0\n"
+      },
+      "description": "Invariant violated: counterexample found: {\"model\": \"debt_value -> 1\\ncollateral_value -> 0\\n\"}",
+      "invariant": "CollateralizationRatio",
+      "severity": "Violated",
+      "verified": false
+    }
+  ],
+  "elapsed_secs": 0.246694397,
+  "failed": 8,
+  "passed": 1
+}

@@ -256,7 +256,32 @@ impl SignerChecker {
         }
 
         // If it's raw AccountInfo or UncheckedAccount and named like authority → flag it
+        // BUT: UncheckedAccount with seeds+bump is a PDA authority — validated by
+        // address derivation, not by signing. Never flag PDA authorities.
         if type_name == "AccountInfo" || type_name == "UncheckedAccount" {
+            // Check ALL attributes (not just #[account(...)]) for seeds/bump
+            let has_pda_seeds = field.attrs.iter().any(|attr| {
+                let s = quote::quote!(#attr).to_string();
+                s.contains("seeds") && s.contains("bump")
+            });
+            // Also check for CHECK comment indicating deliberate UncheckedAccount usage
+            let has_check_comment = field.attrs.iter().any(|attr| {
+                let s = quote::quote!(#attr).to_string();
+                s.contains("CHECK")
+            });
+
+            if has_pda_seeds {
+                // PDA authority — validated by address derivation, not signing
+                self.has_signer_enforcement = true;
+                return;
+            }
+            if type_name == "UncheckedAccount" && has_check_comment {
+                // Deliberate UncheckedAccount with CHECK doc — developer acknowledged
+                // Check if any other field in the struct provides signer enforcement
+                // (this is handled at the struct level, not per-field)
+                return;
+            }
+
             self.has_unprotected_authority = true;
             self.authority_fields.push(field_name);
         }

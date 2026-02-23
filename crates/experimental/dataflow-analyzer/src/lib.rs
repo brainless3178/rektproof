@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! Dataflow Analysis Engine for Solana Programs
 //!
 //! Tracks how values propagate through a program using reaching definitions
@@ -150,13 +151,13 @@ pub struct DataflowAnalyzer {
 }
 
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
+
 struct CFGEdge {
     kind: EdgeKind,
 }
 
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
+
 enum EdgeKind {
     Sequential,
     TrueBranch,

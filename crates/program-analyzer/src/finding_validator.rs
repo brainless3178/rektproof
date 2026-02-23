@@ -401,21 +401,6 @@ impl ProjectContext {
 
         score / max
     }
-
-    /// Check if a specific function has a specific mitigation signal.
-    #[allow(dead_code)]
-    fn function_has_signal(&self, fn_name: &str, signal: &str) -> bool {
-        match signal {
-            "pda_signed" => self.pda_signed_functions.contains(fn_name),
-            "init_protected" => self.init_protected_functions.contains(fn_name),
-            "mint_protected" => self.mint_authority_protected.contains(fn_name),
-            "slippage" => self.functions_with_slippage.contains(fn_name),
-            "amount_validation" => self.functions_with_amount_validation.contains(fn_name),
-            "time_checks" => self.functions_with_time_checks.contains(fn_name),
-            "helper" => self.helper_function_names.contains(fn_name),
-            _ => false,
-        }
-    }
 }
 
 /// Extract function names from a code block.
@@ -1508,14 +1493,18 @@ fn is_proven_safe(finding: &VulnerabilityFinding, ctx: &ProjectContext) -> bool 
         // ── SOL-ALIAS-02: Raw AccountInfo Without Type Safety ───────
         // FALSE POSITIVE IF:
         // a) The account is a well-known system program (token_program, etc.)
-        // b) The account has a CHECK comment
+        // b) The account has a CHECK comment (in source file)
         // c) The account is validated by has_one in the struct
         // d) The program is a Kani proof or test
+        // e) The account has seeds= constraint (PDA-derived)
+        // f) The account is a CPI pass-through (placeholder, cpi_*)
+        // g) The account name implies it's intentionally untyped
         "SOL-ALIAS-02" => {
             let name_lower = finding.vulnerable_code.to_lowercase();
             // System programs are raw AccountInfo by convention but safe
             if name_lower.contains("system_program") || name_lower.contains("token_program")
                 || name_lower.contains("rent") || name_lower.contains("clock")
+                || name_lower.contains("associated_token") || name_lower.contains("_program")
             {
                 return true;
             }
@@ -1523,34 +1512,725 @@ fn is_proven_safe(finding: &VulnerabilityFinding, ctx: &ProjectContext) -> bool 
             if finding.location.contains("kani") || finding.location.contains("proof_") {
                 return true;
             }
+            // PDA-derived accounts validated by seeds
+            if code.contains("seeds =") || code.contains("seeds=")
+                || norm.contains("seeds=") || norm.contains("seeds=[")
+            {
+                return true;
+            }
+            // CPI pass-through accounts (placeholder, cpi_memory, etc.)
+            if name_lower.contains("placeholder") || name_lower.contains("cpi_")
+                || name_lower.contains("remaining") || name_lower.contains("accounts_infos")
+            {
+                return true;
+            }
+            // Authority-like names with CHECK comment in source file
+            if let Some(src) = ctx.source_index.get(&finding.location) {
+                let field_name = name_lower.split(':').next().unwrap_or("").trim()
+                    .trim_start_matches("pub ");
+                if !field_name.is_empty() {
+                    // Look for /// CHECK: near the field declaration
+                    for (i, line) in src.lines().enumerate() {
+                        if line.contains(field_name) && line.contains("AccountInfo") {
+                            // Check 5 lines above for CHECK comment
+                            let start = i.saturating_sub(5);
+                            let window: String = src.lines()
+                                .skip(start).take(i - start + 1)
+                                .collect::<Vec<_>>().join("\n");
+                            if window.contains("CHECK") {
+                                return true;
+                            }
+                            // Check if the field has seeds= in its attribute block
+                            if window.contains("seeds") && window.contains("bump") {
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
+            // If the struct has has_one referencing this account
+            if code.contains("has_one") || norm.contains("has_one") {
+                return true;
+            }
+            false
+        }
+
+        // ── SOL-ALIAS-03: UncheckedAccount Without CHECK Comment ────
+        // FALSE POSITIVE IF: The source file has /// CHECK: near the field
+        "SOL-ALIAS-03" => {
+            // Re-check source for CHECK comment with wider window
+            if let Some(src) = ctx.source_index.get(&finding.location) {
+                let field_name = finding.vulnerable_code.split(':').next()
+                    .unwrap_or("").trim().trim_start_matches("pub ").to_lowercase();
+                if !field_name.is_empty() {
+                    for (i, line) in src.lines().enumerate() {
+                        if line.to_lowercase().contains(&field_name)
+                            && line.contains("UncheckedAccount")
+                        {
+                            let start = i.saturating_sub(5);
+                            let window: String = src.lines()
+                                .skip(start).take(i - start + 1)
+                                .collect::<Vec<_>>().join("\n");
+                            if window.contains("CHECK") {
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
             false
         }
 
         // ── SOL-ALIAS-04: Token Account Without Mint Verification ───
-        // FALSE POSITIVE IF:
-        // a) The token account has seeds= constraint (PDA = known mint)
-        // b) The token account has has_one constraint
-        // c) The token account is validated by constraint =
-        // d) The program uses CpiContext with known token accounts
         "SOL-ALIAS-04" => {
-            // PDA-derived token accounts are tied to a specific mint by the seeds
             if code.contains("seeds =") || code.contains("seeds=") {
                 return true;
             }
-            // has_one validates the account belongs to the expected owner/mint
             if code.contains("has_one") || norm.contains("has_one") {
                 return true;
             }
-            // constraint= with a mint or authority validation
             if code.contains("constraint =") || code.contains("constraint=") {
                 return true;
             }
-            // CpiContext bridges validate accounts through the program
             if code.contains("CpiContext") {
                 return true;
             }
-            // High anchor typed ratio = likely properly constrained
             if ctx.anchor_typed_ratio > 0.8 {
+                return true;
+            }
+            false
+        }
+
+        // ── SOL-ALIAS-05: Authority Account Without Signer Check ────
+        // FALSE POSITIVE IF:
+        // a) The authority field has seeds= constraint (PDA authority)
+        //    PDA authorities are validated by ADDRESS DERIVATION,
+        //    not by signing. They should NEVER be Signer<'info>.
+        // b) The authority is a has_one target from a validated account
+        // c) The account has a CHECK comment in source
+        // d) The struct has a separate Signer account (validation
+        //    happens through the signer, authority is data-matched)
+        "SOL-ALIAS-05" | "SOL-001" => {
+            // (a) PDA authority: seeds= + bump = validated by derivation
+            //     This is THE most common FP — PDA authorities are never signers
+            if code.contains("seeds =") || code.contains("seeds=")
+                || norm.contains("seeds=") || norm.contains("seeds=[")
+            {
+                return true;
+            }
+            // Also check if bump= is in the code snippet (multi-line snippet)
+            if (code.contains("bump =") || code.contains("bump="))
+                && (code.contains("UncheckedAccount") || code.contains("AccountInfo"))
+            {
+                return true;
+            }
+
+            // Try to find the source file (handles both filename-only and full-path keys)
+            let filename = finding.location.rsplit('/').next().unwrap_or(&finding.location);
+            let src_opt = ctx.source_index.get(&finding.location)
+                .or_else(|| ctx.source_index.get(filename))
+                .or_else(|| {
+                    ctx.source_index.iter()
+                        .find(|(k, _)| k.ends_with(filename) || finding.location.ends_with(k.as_str()))
+                        .map(|(_, v)| v)
+                });
+
+            if let Some(src) = src_opt {
+                // Extract the field name from the finding
+                let field_name = finding.vulnerable_code.split(':').next()
+                    .unwrap_or("").trim().trim_start_matches("pub ").to_lowercase();
+                // Also try the function_name which often has struct::field format
+                let fn_field = finding.function_name.split("::").last()
+                    .unwrap_or("").to_lowercase();
+
+                let target_name = if !field_name.is_empty() { &field_name } else { &fn_field };
+
+                if !target_name.is_empty() {
+                    for (i, line) in src.lines().enumerate() {
+                        let ll = line.to_lowercase();
+                        if ll.contains(target_name)
+                            && (ll.contains("accountinfo") || ll.contains("account_info")
+                                || ll.contains("uncheckedaccount") || ll.contains("unchecked_account"))
+                        {
+                            // Look at the 10 lines above this field for seeds/bump/CHECK
+                            let start = i.saturating_sub(10);
+                            let window: String = src.lines()
+                                .skip(start).take(i - start + 1)
+                                .collect::<Vec<_>>().join("\n");
+                            if window.contains("seeds") && window.contains("bump") {
+                                return true;
+                            }
+                            if window.contains("CHECK") {
+                                // CHECK comment = developer acknowledged UncheckedAccount
+                                if src.contains("Signer<") || src.contains("Signer <") {
+                                    return true;
+                                }
+                            }
+                        }
+                    }
+                }
+                // If the file has a Signer AND the authority field has CHECK
+                if src.contains("Signer<'info>") || src.contains("Signer < 'info >") {
+                    // Authority is data-matched, not a permissioning account
+                    let check_near_authority = src.lines().any(|line| {
+                        let ll = line.to_lowercase();
+                        (ll.contains("authority") || ll.contains(target_name))
+                            && (ll.contains("accountinfo") || ll.contains("account_info")
+                                || ll.contains("uncheckedaccount") || ll.contains("unchecked_account"))
+                    });
+                    if check_near_authority {
+                        // Search for CHECK above any authority/target field
+                        let lines: Vec<&str> = src.lines().collect();
+                        for (i, line) in lines.iter().enumerate() {
+                            let ll = line.to_lowercase();
+                            if (ll.contains("authority") || ll.contains(target_name))
+                                && (ll.contains("accountinfo") || ll.contains("account_info")
+                                    || ll.contains("uncheckedaccount") || ll.contains("unchecked_account"))
+                            {
+                                let start = i.saturating_sub(5);
+                                for j in start..i {
+                                    if lines.get(j).map_or(false, |l| l.contains("CHECK")) {
+                                        return true;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            // (b) has_one constraint targets are data-matched
+            if code.contains("has_one") || norm.contains("has_one") {
+                return true;
+            }
+            // (c) Struct-level: the struct has another Signer field
+            //     and the authority is referenced by has_one elsewhere
+            for (_file, src) in &ctx.source_index {
+                // Find the struct that contains this function (handle struct::field format)
+                let struct_name = finding.function_name.split("::").next().unwrap_or(&finding.function_name);
+                if src.contains(&format!("struct {}", struct_name))
+                    || src.contains(&format!("pub struct {}", struct_name))
+                {
+                    if (src.contains("Signer<") || src.contains("Signer <"))
+                        && src.contains("has_one")
+                    {
+                        return true;
+                    }
+                    // PDA authority in the same struct
+                    if src.contains("seeds =") && src.contains("bump") {
+                        return true;
+                    }
+                }
+            }
+            false
+        }
+
+        // ── SOL-003: Missing Owner/Authority Validation ─────────────
+        // FALSE POSITIVE IF:
+        // a) Code uses Anchor Account<'info, T> (auto-validates owner)
+        // b) Code has has_one or constraint checking
+        // c) The flagged account is an InterfaceAccount or Box<Account<>>
+        // d) The field has seeds= (PDA, owner is the program)
+        "SOL-003" => {
+            // Anchor typed accounts auto-validate owner
+            if code.contains("Account<") || code.contains("Account <")
+                || code.contains("InterfaceAccount") || code.contains("AccountLoader")
+            {
+                if code.contains("has_one") || code.contains("constraint")
+                    || code.contains("seeds") || code.contains("token::")
+                {
+                    return true;
+                }
+            }
+            // Box<InterfaceAccount<>> or Box<Account<>> patterns
+            if code.contains("Box<InterfaceAccount") || code.contains("Box<Account")
+                || code.contains("Box < InterfaceAccount") || code.contains("Box < Account")
+            {
+                return true;
+            }
+            // Check source file for the flagged field's constraints
+            if let Some(src) = ctx.source_index.get(&finding.location) {
+                let field_name = finding.vulnerable_code.split(':').next()
+                    .unwrap_or("").trim().trim_start_matches("pub ").to_lowercase();
+                if !field_name.is_empty() {
+                    for (i, line) in src.lines().enumerate() {
+                        let ll = line.to_lowercase();
+                        if ll.contains(&field_name) {
+                            let start = i.saturating_sub(5);
+                            let window: String = src.lines()
+                                .skip(start).take(i - start + 1)
+                                .collect::<Vec<_>>().join("\n");
+                            if window.contains("has_one") || window.contains("constraint")
+                                || window.contains("seeds") || window.contains("token::")
+                            {
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
+            false
+        }
+
+        // ── SOL-006: Duplicate Mutable Accounts ─────────────────────
+        // FALSE POSITIVE IF: constraint= with != check exists
+        "SOL-006" => {
+            if code.contains("constraint") && code.contains("!=") {
+                return true;
+            }
+            if code.contains("has_one") || code.contains("seeds") {
+                return true;
+            }
+            false
+        }
+
+        // ── SOL-014: Unsafe Deserialization ──────────────────────────
+        // FALSE POSITIVE IF:
+        // a) CPI helper functions (cpi_deposit, cpi_withdraw) that
+        //    receive pre-validated accounts from the handler
+        // b) Anchor AccountDeserialize (validates discriminator)
+        // c) try_deserialize_unchecked on known-type accounts
+        "SOL-014" => {
+            // CPI helper functions pass through pre-validated accounts
+            if fn_lower.starts_with("cpi_") || fn_lower.contains("_cpi") {
+                return true;
+            }
+            // Anchor AccountDeserialize validates discriminator
+            if code.contains("AccountDeserialize") || code.contains("try_deserialize(") {
+                return true;
+            }
+            // try_deserialize_unchecked on typed accounts (Mint, TokenAccount)
+            // is used for read-only inspection, not for trust decisions
+            if code.contains("try_deserialize_unchecked") {
+                // If the deserialized type is a known SPL type, it's read-only
+                if code.contains("Mint") || code.contains("TokenAccount")
+                    || code.contains("Account<")
+                {
+                    return true;
+                }
+            }
+            // Helper function that receives AccountInfo from validated context
+            if ctx.helper_function_names.contains(fn_name) {
+                return true;
+            }
+            false
+        }
+
+        // ── SOL-018: Flash Loan Attack ──────────────────────────────
+        // FALSE POSITIVE IF: flash loan repayment is verified
+        "SOL-018" => {
+            if code.contains("flash_loan_fee") || code.contains("FlashLoanFee")
+                || code.contains("repay_amount") || code.contains("flash_repay")
+            {
+                return true;
+            }
+            // Project has flash loan repayment verification
+            for (_file, src) in &ctx.source_index {
+                if (src.contains("flash_repay") || src.contains("FlashRepay"))
+                    && (src.contains("require!") || src.contains("require_gte"))
+                {
+                    return true;
+                }
+            }
+            false
+        }
+
+        // ── SOL-076: Account Type Confusion ─────────────────────────
+        // FALSE POSITIVE IF:
+        // a) The AccountInfo has /// CHECK: documentation
+        // b) The field has seeds= + bump (PDA validated)
+        // c) The field is a known CPI pass-through account
+        // d) The field has address= constraint
+        "SOL-076" => {
+            // Check source file for CHECK comment near the flagged field
+            if let Some(src) = ctx.source_index.get(&finding.location) {
+                let field_name = finding.vulnerable_code.split(':').next()
+                    .unwrap_or("").trim().trim_start_matches("pub ").to_lowercase();
+                if !field_name.is_empty() {
+                    let lines: Vec<&str> = src.lines().collect();
+                    for (i, line) in lines.iter().enumerate() {
+                        let ll = line.to_lowercase();
+                        if ll.contains(&field_name) && (ll.contains("accountinfo") || ll.contains("account_info")) {
+                            // Look 8 lines above for CHECK, seeds, address
+                            let start = i.saturating_sub(8);
+                            for j in start..i {
+                                if let Some(prev) = lines.get(j) {
+                                    if prev.contains("CHECK") {
+                                        return true;
+                                    }
+                                    if prev.contains("seeds") && src.lines()
+                                        .skip(start).take(i - start + 1)
+                                        .any(|l| l.contains("bump"))
+                                    {
+                                        return true;
+                                    }
+                                    if prev.contains("address") {
+                                        return true;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            // PDA authority patterns in the code chunk
+            if code.contains("seeds =") && code.contains("bump") {
+                return true;
+            }
+            // Known pass-through names
+            let name_lower = finding.vulnerable_code.to_lowercase();
+            if name_lower.contains("placeholder") || name_lower.contains("cpi_")
+                || name_lower.contains("_program") || name_lower.contains("system_program")
+            {
+                return true;
+            }
+            false
+        }
+
+        // ── SOL-CFG-01: CPI Call Not Dominated by Auth Check ────────
+        // FALSE POSITIVE IF:
+        // a) The struct has Signer<'info> — Anchor enforces auth at
+        //    deserialization time, BEFORE any handler code runs.
+        //    The CFG only sees the handler body, not struct constraints.
+        // b) The CPI uses invoke_signed (PDA signer = controlled)
+        // c) The function calls auth-validating helpers (assert_*, check_*)
+        "SOL-CFG-01" => {
+            // (a) Check source file for Signer in the accounts struct
+            if let Some(src) = ctx.source_index.get(&finding.location) {
+                if src.contains("Signer<'info>") || src.contains("Signer < 'info >")
+                    || src.contains("Signer<") || src.contains(": Signer")
+                {
+                    return true;
+                }
+                // has_one with admin/authority = auth exists at struct level
+                if src.contains("has_one = admin") || src.contains("has_one = authority")
+                    || src.contains("has_one = owner")
+                {
+                    return true;
+                }
+            }
+            // (b) invoke_signed = PDA-signed CPI, controlled by program
+            if code.contains("invoke_signed") || code.contains("new_with_signer")
+                || code.contains("CpiContext::new_with_signer")
+            {
+                return true;
+            }
+            // (c) Auth helper calls
+            if code.contains("assert_") || code.contains("check_authority")
+                || code.contains("validate_") || code.contains("require_keys_eq")
+            {
+                return true;
+            }
+            // Cross-file: check if the struct for this handler has Signer
+            for (_file, src) in &ctx.source_index {
+                if src.contains(&format!("struct {}", finding.function_name)) {
+                    if src.contains("Signer<") || src.contains("Signer <")
+                        || src.contains("has_one")
+                    {
+                        return true;
+                    }
+                }
+            }
+            false
+        }
+
+        // ── SOL-CFG-02/03/04: Other CFG findings ───────────────────
+        "SOL-CFG-02" | "SOL-CFG-03" | "SOL-CFG-04" => {
+            // Same Anchor struct-level Signer logic
+            if let Some(src) = ctx.source_index.get(&finding.location) {
+                if src.contains("Signer<") || src.contains("has_one")
+                    || src.contains("constraint")
+                {
+                    return true;
+                }
+            }
+            if code.contains("invoke_signed") || code.contains("new_with_signer") {
+                return true;
+            }
+            false
+        }
+
+        // ── SOL-009: Account Closing Issues ─────────────────────────
+        "SOL-009" => {
+            if code.contains("close =") || code.contains("CLOSED_ACCOUNT_DISCRIMINATOR")
+                || code.contains("data.fill(0)")
+            {
+                return true;
+            }
+            false
+        }
+
+        // ── SOL-013: Missing Rent Exemption ─────────────────────────
+        "SOL-013" => {
+            // Anchor init handles rent exemption automatically
+            if code.contains("#[account(init") || code.contains("init,") {
+                return true;
+            }
+            if code.contains("rent_exempt") || code.contains("Rent::get") {
+                return true;
+            }
+            // Anchor projects handle rent automatically
+            if ctx.anchor_file_count > 0 {
+                return true;
+            }
+            false
+        }
+
+        // ── SOL-016: Unchecked Return Value ─────────────────────────
+        "SOL-016" => {
+            if code.contains("?") || code.contains(".unwrap()") || code.contains(".expect(") {
+                return true;
+            }
+            false
+        }
+
+        // ── SOL-022: Freeze Authority Issues ────────────────────────
+        "SOL-022" => {
+            if code.contains("freeze_authority") || code.contains("is_frozen") {
+                return true;
+            }
+            false
+        }
+
+        // ── SOL-025: Lamport Balance Drain ──────────────────────────
+        "SOL-025" => {
+            if code.contains("close =") || code.contains("try_borrow_lamports") {
+                return true;
+            }
+            if code.contains("Signer<") || code.contains("has_one") {
+                return true;
+            }
+            false
+        }
+
+        // ── SOL-026: CPI Depth ──────────────────────────────────────
+        "SOL-026" => {
+            // Only a concern at depth 4+ which is rare
+            if code.contains("invoke") && !code.contains("invoke(") {
+                return true;
+            }
+            false
+        }
+
+        // ── SOL-028: Account Resurrection ───────────────────────────
+        "SOL-028" => {
+            if code.contains("close =") || code.contains("data.fill(0)")
+                || code.contains("CLOSED_ACCOUNT_DISCRIMINATOR")
+            {
+                return true;
+            }
+            false
+        }
+
+        // ── SOL-035: Front-Running ──────────────────────────────────
+        "SOL-035" => {
+            if code.contains("min_amount") || code.contains("deadline")
+                || code.contains("ExceededSlippage") || code.contains("slippage")
+            {
+                return true;
+            }
+            if ctx.has_slippage_protection {
+                return true;
+            }
+            false
+        }
+
+        // ── SOL-037: Division Before Multiplication ─────────────────
+        "SOL-037" => {
+            if code.contains("u128") || code.contains("checked_div")
+                || code.contains("ceil_div")
+            {
+                return true;
+            }
+            if ctx.has_u128_precision || ctx.has_safe_math_module {
+                return true;
+            }
+            false
+        }
+
+        // ── SOL-040: Missing Zero Check ─────────────────────────────
+        "SOL-040" => {
+            if code.contains("!= 0") || code.contains("> 0")
+                || code.contains("require_gt") || code.contains("NonZero")
+            {
+                return true;
+            }
+            false
+        }
+
+        // ── SOL-043: Hardcoded Address ──────────────────────────────
+        // Almost always intentional for program IDs, admin keys
+        "SOL-043" => {
+            // Hardcoded addresses are usually intentional
+            true
+        }
+
+        // ── SOL-052: Governance Attack ──────────────────────────────
+        "SOL-052" => {
+            if code.contains("timelock") || code.contains("pending_admin")
+                || code.contains("delay") || code.contains("governance")
+            {
+                return true;
+            }
+            false
+        }
+
+        // ── SOL-082: Missing has_one Constraint ─────────────────────
+        // FALSE POSITIVE IF:
+        // a) The field has `address = state.field` which is equivalent to has_one
+        // b) The field is a rent payer (Signer for init) — no privilege escalation
+        // c) The code validates the authority via CHECK + Signer in struct
+        // d) The struct has constraint= with key comparison
+        // e) The authority is validated in handler body (check_token_source_account, etc.)
+        // f) The state account has has_one for this field
+        "SOL-082" => {
+            // (a) address= constraint is equivalent to has_one
+            if code.contains("address") || norm.contains("address=") || norm.contains("address =") {
+                return true;
+            }
+            // (b) Rent payer — anyone can pay, no authorization needed
+            if code.contains("payer") || fn_lower.contains("payer") {
+                return true;
+            }
+            // (c) Constraint with == is explicit validation
+            if code.contains("constraint") && code.contains("==") {
+                return true;
+            }
+
+            // Try to find the source file (handles both filename-only and full-path keys)
+            let filename = finding.location.rsplit('/').next().unwrap_or(&finding.location);
+            let src_opt = ctx.source_index.get(&finding.location)
+                .or_else(|| ctx.source_index.get(filename))
+                .or_else(|| {
+                    ctx.source_index.iter()
+                        .find(|(k, _)| k.ends_with(filename) || finding.location.ends_with(k.as_str()))
+                        .map(|(_, v)| v)
+                });
+
+            if let Some(src) = src_opt {
+                // (d) address= or constraint= in source file
+                if src.contains("address =") || src.contains("address=") {
+                    return true;
+                }
+                // (e) Runtime validation: check_token_source_account verifies
+                // the authority owns the token account (equivalent to has_one)
+                if src.contains("check_token_source_account")
+                    || src.contains("check_token_account_owner")
+                    || src.contains(".owner ==")
+                    || src.contains(".authority ==")
+                {
+                    return true;
+                }
+                // (f) state.check_* pattern validates authority in handler
+                if src.contains("state.check_") || src.contains("self.state.check_") {
+                    return true;
+                }
+                // Signer + has_one combo in the same struct is already validated
+                if (src.contains("Signer<") || src.contains("Signer <"))
+                    && (src.contains("has_one") || src.contains("constraint"))
+                {
+                    return true;
+                }
+            }
+            false
+        }
+
+        // ── SOL-073: Missing PDA Validation / Insecure PDA Derivation ──
+        // FALSE POSITIVE IF:
+        // a) The account has `owner = stake::program::ID` — stake accounts
+        //    are native program accounts, they CANNOT be PDAs
+        // b) The account has `owner = system_program::ID` — system accounts
+        // c) The field has seeds= + bump= (already has PDA validation)
+        // d) The code uses find_program_address (PDA derivation is present)
+        "SOL-073" => {
+            // (a,b) Native program-owned accounts cannot be PDAs
+            if code.contains("owner") && (code.contains("stake") || code.contains("system")
+                || code.contains("Stake") || code.contains("System"))
+            {
+                return true;
+            }
+            if norm.contains("owner=") && (norm.contains("stake") || norm.contains("system")) {
+                return true;
+            }
+            // (c) Already has seeds+bump
+            if code.contains("seeds") && code.contains("bump") {
+                return true;
+            }
+            // (d) Uses find_program_address
+            if code.contains("find_program_address") {
+                return true;
+            }
+            // Check source file
+            if let Some(src) = ctx.source_index.get(&finding.location) {
+                // Any owner= constraint referencing native programs
+                if src.contains("owner =") || src.contains("owner=") {
+                    let has_native_owner = src.contains("stake::program")
+                        || src.contains("system_program")
+                        || src.contains("token::ID")
+                        || src.contains("Stake")
+                        || src.contains("spl_stake");
+                    if has_native_owner {
+                        return true;
+                    }
+                }
+            }
+            false
+        }
+
+        // ── SOL-017: Reentrancy / CPI Guard ─────────────────────────
+        // FALSE POSITIVE IF:
+        // a) CPI target is a native program (Stake, System, Token) — cannot re-enter
+        // b) invoke_signed + native program target = PDA-controlled, safe
+        // c) Source file has validated Program<'info, T> for all CPI targets
+        // d) invoke() call is to a native stake/system/token instruction
+        "SOL-017" => {
+            // Check if CPI targets are native programs
+            let native_programs = ["stake_program", "system_program", "token_program",
+                                   "associated_token_program", "stake::program",
+                                   "StakeProgram", "SystemProgram"];
+
+            // Native program instruction builders in the code snippet
+            let native_instruction_builders = ["stake::instruction::", "system_instruction::",
+                                                "spl_token::instruction::", "token::"];
+
+            // Check code snippet first for native instruction calls
+            if native_instruction_builders.iter().any(|p| code.contains(p)) {
+                return true;
+            }
+
+            // Try to find the source file (handles both filename-only and full-path keys)
+            let filename = finding.location.rsplit('/').next().unwrap_or(&finding.location);
+            let src_opt = ctx.source_index.get(&finding.location)
+                .or_else(|| ctx.source_index.get(filename))
+                .or_else(|| {
+                    ctx.source_index.iter()
+                        .find(|(k, _)| k.ends_with(filename) || finding.location.ends_with(k.as_str()))
+                        .map(|(_, v)| v)
+                });
+
+            if let Some(src) = src_opt {
+                let has_native_target = native_programs.iter().any(|p| src.contains(p));
+                let has_native_instruction = native_instruction_builders.iter().any(|p| src.contains(p));
+                let has_invoke_signed = src.contains("invoke_signed");
+                let has_program_typed = src.contains("Program<") || src.contains("Program <");
+
+                // Native program CPI (invoke or invoke_signed) = no reentrancy risk
+                if has_native_target && (has_invoke_signed || has_native_instruction) {
+                    return true;
+                }
+                // All CPI targets are typed Program<> = validated, safe
+                if has_native_target && has_program_typed {
+                    return true;
+                }
+                // invoke() to a native instruction builder = safe
+                if has_native_instruction {
+                    return true;
+                }
+            }
+
+            // Check the code snippet itself
+            if code.contains("stake_program") || code.contains("system_program")
+                || code.contains("token_program")
+            {
                 return true;
             }
             false

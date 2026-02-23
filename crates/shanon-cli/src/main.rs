@@ -1,6 +1,5 @@
 mod tui;
 mod dashboard;
-mod commands;
 
 use clap::{Parser, Subcommand};
 use colored::*;

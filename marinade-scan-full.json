@@ -1,0 +1,292 @@
+[
+  {
+    "attack_scenario": "Attacker passes a target account without signing, bypassing authority checks. This allows unauthorized state modifications, fund transfers, and ownership changes.",
+    "category": "Access Control",
+    "confidence": 82,
+    "consensus": {
+      "agreement_ratio": 1.0,
+      "confidence_score": 1.0,
+      "should_report": true,
+      "verdict": "Confirmed",
+      "votes": 1
+    },
+    "cwe": "CWE-862",
+    "description": "Field `stake_withdraw_authority` in `WithdrawStakeAccount` is a privileged role (UncheckedAccount) using `UncheckedAccount` without signer enforcement. The Solana runtime does not check `is_signer` unless the program explicitly validates it. An attacker can pass any pubkey as `stake_withdraw_authority` and execute privileged operations. Use `Signer<'info>` instead of `AccountInfo<'info>`, or add `#[account(signer)]`. Without signer validation, the Solana runtime allows any account to be passed in the authority position. An attacker constructs a transaction with their own pubkey as the authority field and the runtime will not reject it. This is the most common Solana vulnerability pattern -- the Wormhole bridge exploit ($320M) was caused by a missing signer check on the guardian set update. [found in 12 locations; also in: deposit_stake_account.rs:DepositStakeAccount::msol_mint_authority, deposit.rs:Deposit::liq_pool_msol_leg_authority, partial_unstake.rs:PartialUnstake::stake_deposit_authority, emergency_unstake.rs:EmergencyUnstake::stake_deposit_authority, remove_liquidity.rs:RemoveLiquidity::liq_pool_msol_leg_authority, add_liquidity.rs:AddLiquidity::lp_mint_authority, update.rs:UpdateCommon::stake_withdraw_authority, stake_reserve.rs:StakeReserve::stake_deposit_authority, redelegate.rs:ReDelegate::stake_deposit_authority, merge_stakes.rs:MergeStakes::stake_deposit_authority, deactivate_stake.rs:DeactivateStake::stake_deposit_authority]",
+    "fix": {
+      "diff": "- 69:         bump = state.stake_system.stake_withdraw_bump_seed\n+ #[derive(Accounts)]",
+      "explanation": "Apply the 'Signer Validation' pattern: Validates account is a signer",
+      "fixed_code": "\n#[derive(Accounts)]\npub struct SecureAccounts<'info> {\n    #[account(mut)]\n    pub authority: Signer<'info>,\n    // ... other accounts\n}\n",
+      "original_code": "69:         bump = state.stake_system.stake_withdraw_bump_seed\n70:     )]\n71:     pub stake_withdraw_authority: UncheckedAccount<'info>,\n72:     /// CHECK: PDA\n73:     #[account(",
+      "vulnerability_id": "SOL-001"
+    },
+    "function_name": "WithdrawStakeAccount::stake_withdraw_authority",
+    "id": "SOL-001",
+    "line_number": 71,
+    "location": "/tmp/marinade-liquid-staking/programs/marinade-finance/src/instructions/user/withdraw_stake_account.rs",
+    "poc": {
+      "attack_steps": [
+        {
+          "action_type": "Setup",
+          "code_snippet": "69:         bump = state.stake_system.stake_withdraw_bump_seed\n70:     )]\n71:     pub stake_withdraw_authority: UncheckedAccount<'info>,\n72:     /// CHECK: PDA\n73:     #[account(",
+          "description": "Identify the vulnerable instruction that doesn't verify signer",
+          "step_number": 1
+        },
+        {
+          "action_type": "Transaction",
+          "code_snippet": null,
+          "description": "Craft transaction with victim's authority but without their signature",
+          "step_number": 2
+        },
+        {
+          "action_type": "Exploitation",
+          "code_snippet": null,
+          "description": "Submit transaction - only attacker signs",
+          "step_number": 3
+        },
+        {
+          "action_type": "Extraction",
+          "code_snippet": null,
+          "description": "Funds transferred to attacker's account",
+          "step_number": 4
+        }
+      ],
+      "difficulty": "Trivial",
+      "economic_impact": "CRITICAL - Complete vault/account drainage possible",
+      "expected_outcome": "Attacker can perform actions on behalf of any authority without their consent",
+      "mitigations": [
+        "Add Signer<'info> constraint to authority account",
+        "Use #[account(signer)] macro for Anchor programs",
+        "Verify ctx.accounts.authority.is_signer in handler"
+      ],
+      "prerequisites": [
+        "Knowledge of victim's public key",
+        "Program ID and IDL"
+      ],
+      "rust_poc": "// Rust PoC for SOL-001: Missing Signer Check\nuse solana_sdk::{\n    instruction::{AccountMeta, Instruction},\n    pubkey::Pubkey,\n    signature::Keypair,\n    signer::Signer,\n    transaction::Transaction,\n};\n\npub fn exploit_missing_signer(\n    program_id: &Pubkey,\n    victim_authority: &Pubkey,\n    attacker: &Keypair,\n    vault: &Pubkey,\n) -> Instruction {\n    // Craft instruction with victim's authority but without their signature\n    Instruction {\n        program_id: *program_id,\n        accounts: vec![\n            AccountMeta::new(*vault, false),       // Vault (writable)\n            AccountMeta::new_readonly(*victim_authority, false), // Authority (NOT signer!)\n            AccountMeta::new(attacker.pubkey(), true), // Attacker's account\n        ],\n        data: vec![/* WithdrawStakeAccount::stake_withdraw_authority instruction discriminator + withdraw amount */],\n    }\n}",
+      "scenario_name": "SOL-001: Missing Signer Check in WithdrawStakeAccount::stake_withdraw_authority",
+      "typescript_poc": "import * as anchor from \"@coral-xyz/anchor\";\nimport { expect } from \"chai\";\n\ndescribe(\"SOL-001 Exploit: Missing Signer Check\", () => {\n  const provider = anchor.AnchorProvider.env();\n  anchor.setProvider(provider);\n  \n  it(\"allows unauthorized action without proper signer\", async () => {\n    const attacker = anchor.web3.Keypair.generate();\n    const victim = anchor.web3.Keypair.generate();\n    \n    // Airdrop SOL to attacker\n    await provider.connection.requestAirdrop(\n      attacker.publicKey,\n      anchor.web3.LAMPORTS_PER_SOL\n    );\n    \n    // Setup: Victim deposits funds\n    const victimVault = anchor.web3.Keypair.generate();\n    // ... initialize vault with victim's funds ...\n    \n    // EXPLOIT: Attacker calls WithdrawStakeAccount::stake_withdraw_authority without being the authority signer\n    const tx = await program.methods\n      .WithdrawStakeAccount::stake_withdraw_authority(new anchor.BN(1_000_000_000)) // Drain amount\n      .accounts({\n        vault: victimVault.publicKey,\n        authority: victim.publicKey, // Victim's authority (NOT signing!)\n        destination: attacker.publicKey,\n        systemProgram: anchor.web3.SystemProgram.programId,\n      })\n      .signers([attacker]) // Only attacker signs, not victim!\n      .rpc();\n    \n    console.log(\"Exploit TX:\", tx);\n    \n    // Verify: Funds were stolen\n    const attackerBalance = await provider.connection.getBalance(attacker.publicKey);\n    expect(attackerBalance).to.be.greaterThan(anchor.web3.LAMPORTS_PER_SOL);\n  });\n});",
+      "vulnerability_id": "SOL-001"
+    },
+    "prevention": "#[account(signer)]",
+    "real_world_incident": null,
+    "secure_fix": "Replace `AccountInfo<'info>` with `Signer<'info>`:\n```rust\npub stake_withdraw_authority: Signer<'info>,\n```\nOr add the signer constraint:\n```rust\n#[account(signer)]\npub stake_withdraw_authority: AccountInfo<'info>,\n```",
+    "severity": 5,
+    "severity_label": "Critical",
+    "simulation": {
+      "rpc": "https://api.devnet.solana.com",
+      "simulate_only": true,
+      "status": "simulated",
+      "summary": "Simulated MissingSignerCheck exploit for SOL-001 (Missing Signer Validation). Config: RPC=https://api.devnet.solana.com, simulate_only=true, compute_budget=200000"
+    },
+    "vuln_type": "Missing Signer Validation",
+    "vulnerable_code": "69:         bump = state.stake_system.stake_withdraw_bump_seed\n70:     )]\n71:     pub stake_withdraw_authority: UncheckedAccount<'info>,\n72:     /// CHECK: PDA\n73:     #[account("
+  },
+  {
+    "attack_scenario": "",
+    "category": "Access Control",
+    "confidence": 77,
+    "consensus": {
+      "agreement_ratio": 1.0,
+      "confidence_score": 0.800000011920929,
+      "should_report": true,
+      "verdict": "Confirmed",
+      "votes": 1
+    },
+    "cwe": "CWE-346",
+    "description": "Line 264: Raw `invoke_signed()` call without prior program ID validation. The CPI target program is passed by the caller as an `AccountInfo`. Without checking `program.key() == expected_program::ID`, an attacker substitutes a malicious program that mimics the expected instruction interface. Use Anchor's `CpiContext` with `Program<'info, T>` instead, or add `require!(program.key() == expected::ID)` before the invoke call. Raw CPI via invoke/invoke_signed passes whatever program Account the caller provides. The Solana runtime does not validate that the target program is the one the developer intended. This is the primary CPI attack vector on Solana. [found in 7 locations; also in: deposit_stake_account.rs:unknown, partial_unstake.rs:unknown, stake_reserve.rs:unknown, redelegate.rs:unknown, merge_stakes.rs:unknown, deactivate_stake.rs:unknown]",
+    "fix": {
+      "diff": "- 261:         .last()\n+ #[account]",
+      "explanation": "Apply the 'Reentrancy Guard' pattern: Prevents reentrancy attacks",
+      "fixed_code": "\n#[account]\npub struct State {\n    pub is_locked: bool,\n    // ... other fields\n}\n\npub fn secure_instruction(ctx: Context<SecureInstruction>) -> Result<()> {\n    let state = &mut ctx.accounts.state;\n    \n    // Check and set lock\n    require!(!state.is_locked, ErrorCode::ReentrancyDetected);\n    state.is_locked = true;\n    \n    // Do work here (including any CPI)\n    // ...\n    \n    // Release lock\n    state.is_locked = false;\n    \n    Ok(())\n}\n",
+      "original_code": "261:         .last()\n262:         .unwrap()\n263:         .clone();\n264:         invoke_signed(\n265:             &split_instruction,\n266:             &[\n267:                 self.stake_program.to_account_info(),",
+      "vulnerability_id": "SOL-017"
+    },
+    "function_name": "unknown",
+    "id": "SOL-017",
+    "line_number": 264,
+    "location": "/tmp/marinade-liquid-staking/programs/marinade-finance/src/instructions/user/withdraw_stake_account.rs",
+    "poc": {
+      "attack_steps": [
+        {
+          "action_type": "Setup",
+          "code_snippet": null,
+          "description": "Deploy malicious program that re-enters on callback",
+          "step_number": 1
+        },
+        {
+          "action_type": "Exploitation",
+          "code_snippet": null,
+          "description": "Trigger CPI to malicious program before state update",
+          "step_number": 2
+        },
+        {
+          "action_type": "Exploitation",
+          "code_snippet": null,
+          "description": "Malicious program calls back before original tx completes",
+          "step_number": 3
+        }
+      ],
+      "difficulty": "Hard",
+      "economic_impact": "CRITICAL - Double-spend or fund drainage",
+      "expected_outcome": "State manipulated through reentrant call",
+      "mitigations": [
+        "Follow Checks-Effects-Interactions pattern",
+        "Update state BEFORE making external calls",
+        "Use reentrancy guards (lock flag)"
+      ],
+      "prerequisites": [
+        "Custom program deployment",
+        "CPI callback mechanism"
+      ],
+      "rust_poc": null,
+      "scenario_name": "SOL-017: Reentrancy in unknown",
+      "typescript_poc": "// Reentrancy attack requires a malicious callback program\n// This PoC shows the attack flow conceptually\n\ndescribe(\"SOL-017: Reentrancy Attack\", () => {\n  it(\"re-enters before state update\", async () => {\n    // 1. Attacker deploys callback program that:\n    //    - Receives callback from vulnerable program\n    //    - Immediately calls back into unknown \n    \n    // 2. Attack flow:\n    //    vulnerable.unknown() \n    //    -> CPI to attacker's program\n    //    -> callback re-enters unknown\n    //    -> State updated twice (or not at all)\n    \n    // 3. Result: Double-spend or balance manipulation\n  });\n});",
+      "vulnerability_id": "SOL-017"
+    },
+    "prevention": "Program<'info, T> CPI validation",
+    "real_world_incident": null,
+    "secure_fix": "Replace raw invoke with Anchor's typed CPI:\n```rust\n// In Accounts struct:\npub token_program: Program<'info, Token>,\n\n// In handler:\ntoken::transfer(\nCpiContext::new(ctx.accounts.token_program.to_account_info(), ...),\namount,\n)?;\n```",
+    "severity": 5,
+    "severity_label": "Critical",
+    "simulation": {
+      "rpc": "https://api.devnet.solana.com",
+      "simulate_only": true,
+      "status": "simulated",
+      "summary": "Simulated ArbitraryCPI exploit for SOL-017 (Missing CPI Guard). Config: RPC=https://api.devnet.solana.com, simulate_only=true, compute_budget=200000"
+    },
+    "vuln_type": "Missing CPI Guard",
+    "vulnerable_code": "261:         .last()\n262:         .unwrap()\n263:         .clone();\n264:         invoke_signed(\n265:             &split_instruction,\n266:             &[\n267:                 self.stake_program.to_account_info(),"
+  },
+  {
+    "attack_scenario": "",
+    "category": "Anchor Safety",
+    "confidence": 67,
+    "consensus": {
+      "agreement_ratio": 1.0,
+      "confidence_score": 0.699999988079071,
+      "should_report": true,
+      "verdict": "Confirmed",
+      "votes": 1
+    },
+    "cwe": "CWE-862",
+    "description": "Field `burn_msol_authority` in `WithdrawStakeAccount` is a `Signer` but no state account in this struct uses `#[account(has_one = burn_msol_authority)]` to verify ownership. This means ANY valid wallet can call this instruction as the `burn_msol_authority`. Add `has_one = burn_msol_authority` to the relevant state/vault/pool account to bind the signer to stored authority. A Signer constraint only proves that the wallet signed the transaction. It does NOT prove the signer is the authorized authority for a specific account. Without `has_one`, any wallet that signs can act as the authority. The `has_one` constraint makes Anchor compare `state_account.authority == signer.key()` during deserialization. [found in 13 locations; also in: deposit_stake_account.rs:DepositStakeAccount::stake_authority, set_validator_score.rs:SetValidatorScore::manager_authority, remove_validator.rs:RemoveValidator::manager_authority, partial_unstake.rs:PartialUnstake::validator_manager_authority, emergency_unstake.rs:EmergencyUnstake::validator_manager_authority, add_validator.rs:AddValidator::manager_authority, remove_liquidity.rs:RemoveLiquidity::burn_from_authority, liquid_unstake.rs:LiquidUnstake::get_msol_from_authority, order_unstake.rs:OrderUnstake::burn_msol_authority, stake_reserve.rs:StakeReserve::rent_payer, redelegate.rs:ReDelegate::split_stake_rent_payer, deactivate_stake.rs:DeactivateStake::split_stake_rent_payer]",
+    "function_name": "WithdrawStakeAccount::burn_msol_authority",
+    "id": "SOL-082",
+    "line_number": 46,
+    "location": "/tmp/marinade-liquid-staking/programs/marinade-finance/src/instructions/user/withdraw_stake_account.rs",
+    "poc": {
+      "attack_steps": [
+        {
+          "action_type": "Setup",
+          "code_snippet": "44:     pub burn_msol_from: Box<Account<'info, TokenAccount>>,\n45:     #[account(mut)]\n46:     pub burn_msol_authority: Signer<'info>,\n47: \n48:     /// CHECK: deserialized in code, must be the one in State (State has_one treasury_msol_account)",
+          "description": "Analyze vulnerable function: WithdrawStakeAccount::burn_msol_authority",
+          "step_number": 1
+        },
+        {
+          "action_type": "Transaction",
+          "code_snippet": null,
+          "description": "Construct malicious transaction",
+          "step_number": 2
+        },
+        {
+          "action_type": "Exploitation",
+          "code_snippet": null,
+          "description": "Execute exploit and extract value",
+          "step_number": 3
+        }
+      ],
+      "difficulty": "Easy",
+      "economic_impact": "HIGH - Significant financial impact",
+      "expected_outcome": "Vulnerability exploited: Field `burn_msol_authority` in `WithdrawStakeAccount` is a `Signer` but no state account in this struct uses `#[account(has_one = burn_msol_authority)]` to verify ownership. This means ANY valid wallet can call this instruction as the `burn_msol_authority`. Add `has_one = burn_msol_authority` to the relevant state/vault/pool account to bind the signer to stored authority. A Signer constraint only proves that the wallet signed the transaction. It does NOT prove the signer is the authorized authority for a specific account. Without `has_one`, any wallet that signs can act as the authority. The `has_one` constraint makes Anchor compare `state_account.authority == signer.key()` during deserialization. [found in 13 locations; also in: deposit_stake_account.rs:DepositStakeAccount::stake_authority, set_validator_score.rs:SetValidatorScore::manager_authority, remove_validator.rs:RemoveValidator::manager_authority, partial_unstake.rs:PartialUnstake::validator_manager_authority, emergency_unstake.rs:EmergencyUnstake::validator_manager_authority, add_validator.rs:AddValidator::manager_authority, remove_liquidity.rs:RemoveLiquidity::burn_from_authority, liquid_unstake.rs:LiquidUnstake::get_msol_from_authority, order_unstake.rs:OrderUnstake::burn_msol_authority, stake_reserve.rs:StakeReserve::rent_payer, redelegate.rs:ReDelegate::split_stake_rent_payer, deactivate_stake.rs:DeactivateStake::split_stake_rent_payer]",
+      "mitigations": [
+        "#[account(has_one = authority)]"
+      ],
+      "prerequisites": [
+        "Access to /tmp/marinade-liquid-staking/programs/marinade-finance/src/instructions/user/withdraw_stake_account.rs"
+      ],
+      "rust_poc": null,
+      "scenario_name": "SOL-082: Missing has_one Constraint",
+      "typescript_poc": null,
+      "vulnerability_id": "SOL-082"
+    },
+    "prevention": "#[account(has_one = authority)]",
+    "real_world_incident": null,
+    "secure_fix": "Add `has_one = burn_msol_authority` to the state account that stores this authority:\n```rust\n#[account(mut, has_one = burn_msol_authority @ ErrorCode::Unauthorized)]\npub vault: Account<'info, VaultState>,\n```",
+    "severity": 4,
+    "severity_label": "High",
+    "simulation": {
+      "rpc": "https://api.devnet.solana.com",
+      "simulate_only": true,
+      "status": "simulated",
+      "summary": "Simulated AccountConfusion exploit for SOL-082 (Missing has_one Constraint). Config: RPC=https://api.devnet.solana.com, simulate_only=true, compute_budget=200000"
+    },
+    "vuln_type": "Missing has_one Constraint",
+    "vulnerable_code": "44:     pub burn_msol_from: Box<Account<'info, TokenAccount>>,\n45:     #[account(mut)]\n46:     pub burn_msol_authority: Signer<'info>,\n47: \n48:     /// CHECK: deserialized in code, must be the one in State (State has_one treasury_msol_account)"
+  },
+  {
+    "attack_scenario": "",
+    "category": "Cryptographic",
+    "confidence": 67,
+    "consensus": {
+      "agreement_ratio": 1.0,
+      "confidence_score": 0.699999988079071,
+      "should_report": true,
+      "verdict": "Confirmed",
+      "votes": 1
+    },
+    "cwe": "CWE-20",
+    "description": "Field `split_stake_account` in `WithdrawStakeAccount` uses `#[account(init)]` on a custom Account type without `seeds` derivation. If this account should be unique per user/mint/pool, it MUST be a PDA with appropriate seeds. Without seeds, the account address is determined by the caller's keypair, meaning:\n- No uniqueness enforcement (two callers can create separate accounts)\n- No deterministic address derivation (other instructions can't find it)\nAdd `seeds = [b\"prefix\", user.key().as_ref()], bump` for per-user PDAs. Without PDA seed derivation, account addresses are not deterministic. Other instructions cannot reliably locate the account, and there is no on-chain enforcement that the account belongs to a specific user, mint, or pool. This breaks composability and opens the door for account substitution attacks. [found in 5 locations; also in: partial_unstake.rs:PartialUnstake::split_stake_account, stake_reserve.rs:StakeReserve::stake_account, redelegate.rs:ReDelegate::split_stake_account, deactivate_stake.rs:DeactivateStake::split_stake_account]",
+    "function_name": "WithdrawStakeAccount::split_stake_account",
+    "id": "SOL-073",
+    "line_number": 90,
+    "location": "/tmp/marinade-liquid-staking/programs/marinade-finance/src/instructions/user/withdraw_stake_account.rs",
+    "poc": {
+      "attack_steps": [
+        {
+          "action_type": "Setup",
+          "code_snippet": "88:         owner = stake::program::ID,\n89:     )]\n90:     pub split_stake_account: Account<'info, StakeAccount>,\n91:     #[account(\n92:         mut,",
+          "description": "Analyze vulnerable function: WithdrawStakeAccount::split_stake_account",
+          "step_number": 1
+        },
+        {
+          "action_type": "Transaction",
+          "code_snippet": null,
+          "description": "Construct malicious transaction",
+          "step_number": 2
+        },
+        {
+          "action_type": "Exploitation",
+          "code_snippet": null,
+          "description": "Execute exploit and extract value",
+          "step_number": 3
+        }
+      ],
+      "difficulty": "Easy",
+      "economic_impact": "HIGH - Significant financial impact",
+      "expected_outcome": "Vulnerability exploited: Field `split_stake_account` in `WithdrawStakeAccount` uses `#[account(init)]` on a custom Account type without `seeds` derivation. If this account should be unique per user/mint/pool, it MUST be a PDA with appropriate seeds. Without seeds, the account address is determined by the caller's keypair, meaning:\n- No uniqueness enforcement (two callers can create separate accounts)\n- No deterministic address derivation (other instructions can't find it)\nAdd `seeds = [b\"prefix\", user.key().as_ref()], bump` for per-user PDAs. Without PDA seed derivation, account addresses are not deterministic. Other instructions cannot reliably locate the account, and there is no on-chain enforcement that the account belongs to a specific user, mint, or pool. This breaks composability and opens the door for account substitution attacks. [found in 5 locations; also in: partial_unstake.rs:PartialUnstake::split_stake_account, stake_reserve.rs:StakeReserve::stake_account, redelegate.rs:ReDelegate::split_stake_account, deactivate_stake.rs:DeactivateStake::split_stake_account]",
+      "mitigations": [
+        "#[account(seeds = [...], bump)]"
+      ],
+      "prerequisites": [
+        "Access to /tmp/marinade-liquid-staking/programs/marinade-finance/src/instructions/user/withdraw_stake_account.rs"
+      ],
+      "rust_poc": null,
+      "scenario_name": "SOL-073: Missing PDA Validation",
+      "typescript_poc": null,
+      "vulnerability_id": "SOL-073"
+    },
+    "prevention": "#[account(seeds = [...], bump)]",
+    "real_world_incident": null,
+    "secure_fix": "Add seed derivation to create a deterministic, per-user PDA:\n```rust\n#[account(\ninit,\nseeds = [b\"state\", user.key().as_ref()],\nbump,\npayer = user,\nspace = 8 + std::mem::size_of::<StateAccount>(),\n)]\npub split_stake_account: Account<'info, StateAccount>,\n```",
+    "severity": 4,
+    "severity_label": "High",
+    "simulation": {
+      "rpc": "https://api.devnet.solana.com",
+      "simulate_only": true,
+      "status": "simulated",
+      "summary": "Simulated AccountConfusion exploit for SOL-073 (Missing PDA Validation). Config: RPC=https://api.devnet.solana.com, simulate_only=true, compute_budget=200000"
+    },
+    "vuln_type": "Missing PDA Validation",
+    "vulnerable_code": "88:         owner = stake::program::ID,\n89:     )]\n90:     pub split_stake_account: Account<'info, StakeAccount>,\n91:     #[account(\n92:         mut,"
+  }
+]

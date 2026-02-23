@@ -19,7 +19,7 @@ use std::path::Path;
 use tracing::{debug, info};
 
 /// Scans SBF binaries for known vulnerability patterns.
-#[allow(dead_code)]
+
 pub struct BytecodePatternScanner {
     patterns: Vec<BytecodePattern>,
 }
@@ -626,7 +626,7 @@ pub struct BytecodeVulnerability {
 
 /// Definition of a bytecode vulnerability pattern.
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
+
 struct BytecodePattern {
     id: String,
     name: String,

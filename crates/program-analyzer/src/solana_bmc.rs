@@ -31,7 +31,6 @@
 //! - Biere et al. "Bounded Model Checking" (2003)
 //! - Solana Runtime Spec: https://docs.solana.com/developing/programming-model/runtime
 
-use std::collections::HashMap;
 use z3::ast::{Ast, Bool, Int};
 use z3::{Config, Context, SatResult, Solver};
 
@@ -277,7 +276,7 @@ impl SolanaBMC {
         // Create symbolic variables for each account at each step
         let mut account_vars: Vec<Vec<Int>> = Vec::new();
         for step in 0..=depth {
-            let step_vars: Vec<Int> = self.accounts.iter().enumerate().map(|(i, acc)| {
+            let step_vars: Vec<Int> = self.accounts.iter().enumerate().map(|(_i, acc)| {
                 let var = Int::new_const(ctx, format!("{}_{}", acc.name, step));
                 if step == 0 {
                     // Initial state

@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! Arithmetic Security Expert — Static Analysis for Numeric Vulnerabilities
 //!
 //! Performs AST-level analysis of Rust source code to detect arithmetic

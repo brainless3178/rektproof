@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! Coverage-Guided Security Fuzzing for Solana Programs
 //!
 //! Implements a coverage-guided fuzzer that generates test inputs
@@ -258,7 +259,7 @@ pub struct FuzzResult {
 
 /// Coverage tracking
 #[derive(Debug, Clone, Default)]
-#[allow(dead_code)]
+
 pub struct CoverageTracker {
     /// Bitmap of covered edges
     bitmap: Vec<u8>,

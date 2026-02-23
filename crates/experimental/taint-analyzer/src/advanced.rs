@@ -717,7 +717,7 @@ impl Default for BackwardAnalyzer {
 // ----------
 
 /// Advanced taint analyzer implementing all enhanced features
-#[allow(dead_code)]
+
 pub struct AdvancedTaintAnalyzer {
     /// Inter-procedural call graph
     pub call_graph: CallGraph,

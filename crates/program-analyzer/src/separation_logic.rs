@@ -35,7 +35,7 @@
 //! - Reynolds, J.C. "Separation Logic: A Logic for Shared Mutable Data Structures" (2002)
 //! - O'Hearn, P. "A Primer on Separation Logic" (2012)
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fmt;
 
 /// A Solana public key (symbolic or concrete).

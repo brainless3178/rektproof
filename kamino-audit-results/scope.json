@@ -1,0 +1,446 @@
+  + Phase timing:
+    Initialization: 50ms
+    Vulnerability scan: 28699ms
+    Total findings (pre-filter): 7
+[
+  {
+    "attack_scenario": "Attacker mints unlimited tokens.",
+    "category": "Token Security",
+    "confidence": 75,
+    "cwe": "CWE-269",
+    "description": "Mint operation without proper authority validation.",
+    "fix": {
+      "diff": "- /* ACCOUNTS_STRUCT: CreateMintMap */\n+ #[derive(Accounts)]",
+      "explanation": "Apply the 'Token Account Validation' pattern: Validates token account ownership and mint",
+      "fixed_code": "\n#[derive(Accounts)]\npub struct TokenTransfer<'info> {\n    #[account(\n        mut,\n        constraint = source.owner == authority.key() @ ErrorCode::InvalidOwner,\n        constraint = source.mint == expected_mint.key() @ ErrorCode::InvalidMint,\n    )]\n    pub source: Account<'info, TokenAccount>,\n    \n    #[account(\n        mut,\n        constraint = destination.mint == expected_mint.key() @ ErrorCode::InvalidMint,\n    )]\n    pub destination: Account<'info, TokenAccount>,\n    \n    pub authority: Signer<'info>,\n    pub expected_mint: Account<'info, Mint>,\n    pub token_program: Program<'info, Token>,\n}\n",
+      "original_code": "/* ACCOUNTS_STRUCT: CreateMintMap */\n#[derive (Accounts)] #[instruction (seed_pk : Pubkey , seed_id : u64 , bump : u8 , scope_chains : Vec<[u16 ; 4] >,)] pub struct CreateMintMap < 'info> { #[account (mut)] pub admin : Signer<'info> , #[account (has_one = admin)] pub configuration : AccountLoader<'info, crate :: states :: Configuration > , #[account (init, seeds = [seeds :: MINTS_TO_SCOPE_CHAINS , configuration . load () ?. oracle_prices . as_ref () , seed_pk . as_ref () , & seed_id . to_le_bytes ()] , bump , space = 8 + MintsToScopeChains :: size_from_len (scope_chains . len ()) , payer = admin ,)] pub mappings : Account<'info, MintsToScopeChains > , pub system_program : Program<'info, System> , }\n/* HANDLER: */\npub fn process (ctx : Context<CreateMintMap > , seed_pk : Pubkey , seed_id : u64 , bump : u8 , scope_chains : Vec<[u16 ; 4] > ,) -> Result<() > { require_eq ! (ctx . remaining_accounts . len () , scope_chains . len ()) ; ctx . accounts . mappings . set_inner (MintsToScopeChains { seed_pk , seed_id , bump , oracle_prices : ctx . accounts . configuration . load () ? . oracle_prices , mapping : scope_chains . iter () . zip (ctx . remaining_accounts . iter ()) . map (| (chain , mint) | { let mint_data = mint . data . borrow () ; let _ : Mint = Mint :: try_deserialize_unchecked (& mut mint_data . as_ref ()) ? ; Ok (MintToScopeChain { mint : * mint . key , scope_chain : * chain , }) }) . collect :: < Result<Vec<_ > > > () ? , }) ; Ok (()) }",
+      "vulnerability_id": "SOL-021"
+    },
+    "function_name": "process",
+    "id": "SOL-021",
+    "line_number": 34,
+    "location": "handler_create_mint_map.rs",
+    "poc": {
+      "attack_steps": [
+        {
+          "action_type": "Setup",
+          "code_snippet": "/* ACCOUNTS_STRUCT: CreateMintMap */\n#[derive (Accounts)] #[instruction (seed_pk : Pubkey , seed_id : u64 , bump : u8 , scope_chains : Vec<[u16 ; 4] >,)] pub struct CreateMintMap < 'info> { #[account (mut)] pub admin : Signer<'info> , #[account (has_one = admin)] pub configuration : AccountLoader<'info, crate :: states :: Configuration > , #[account (init, seeds = [seeds :: MINTS_TO_SCOPE_CHAINS , configuration . load () ?. oracle_prices . as_ref () , seed_pk . as_ref () , & seed_id . to_le_bytes ()] , bump , space = 8 + MintsToScopeChains :: size_from_len (scope_chains . len ()) , payer = admin ,)] pub mappings : Account<'info, MintsToScopeChains > , pub system_program : Program<'info, System> , }\n/* HANDLER: */\npub fn process (ctx : Context<CreateMintMap > , seed_pk : Pubkey , seed_id : u64 , bump : u8 , scope_chains : Vec<[u16 ; 4] > ,) -> Result<() > { require_eq ! (ctx . remaining_accounts . len () , scope_chains . len ()) ; ctx . accounts . mappings . set_inner (MintsToScopeChains { seed_pk , seed_id , bump , oracle_prices : ctx . accounts . configuration . load () ? . oracle_prices , mapping : scope_chains . iter () . zip (ctx . remaining_accounts . iter ()) . map (| (chain , mint) | { let mint_data = mint . data . borrow () ; let _ : Mint = Mint :: try_deserialize_unchecked (& mut mint_data . as_ref ()) ? ; Ok (MintToScopeChain { mint : * mint . key , scope_chain : * chain , }) }) . collect :: < Result<Vec<_ > > > () ? , }) ; Ok (()) }",
+          "description": "Identify mint instruction without proper authority validation",
+          "step_number": 1
+        },
+        {
+          "action_type": "Exploitation",
+          "code_snippet": null,
+          "description": "Call mint with attacker as authority",
+          "step_number": 2
+        },
+        {
+          "action_type": "Extraction",
+          "code_snippet": null,
+          "description": "Mint unlimited tokens",
+          "step_number": 3
+        }
+      ],
+      "difficulty": "Trivial",
+      "economic_impact": "CRITICAL - Total token value destruction",
+      "expected_outcome": "Attacker mints unlimited tokens, crashing token economy",
+      "mitigations": [
+        "Verify mint authority matches expected PDA or multisig",
+        "Use mint_authority constraint in Anchor",
+        "Implement supply caps"
+      ],
+      "prerequisites": [
+        "Token account for receiving minted tokens"
+      ],
+      "rust_poc": null,
+      "scenario_name": "SOL-021: Unprotected Mint in process",
+      "typescript_poc": "import * as anchor from \"@coral-xyz/anchor\";\nimport { expect } from \"chai\";\n\ndescribe(\"SOL-021: Unprotected Mint Authority\", () => {\n  it(\"allows anyone to mint tokens\", async () => {\n    const attacker = anchor.web3.Keypair.generate();\n    \n    // EXPLOIT: Call mint without proper authority check\n    const tx = await program.methods\n      .mintTokens(new anchor.BN(1_000_000_000_000)) // Mint 1 trillion tokens\n      .accounts({\n        mint: tokenMint,\n        to: attackerTokenAccount,\n        mintAuthority: attacker.publicKey, // Attacker as authority\n        tokenProgram: TOKEN_PROGRAM_ID,\n      })\n      .signers([attacker])\n      .rpc();\n    \n    // Attacker now has unlimited tokens\n    const balance = await getTokenBalance(attackerTokenAccount);\n    expect(balance).to.equal(1_000_000_000_000);\n  });\n});",
+      "vulnerability_id": "SOL-021"
+    },
+    "prevention": "Use PDA as mint authority and validate seeds",
+    "real_world_incident": null,
+    "secure_fix": "Validate mint authority is a signer",
+    "severity": 5,
+    "severity_label": "CRITICAL",
+    "simulation": {
+      "rpc": "https://api.devnet.solana.com",
+      "simulate_only": true,
+      "status": "simulated",
+      "summary": "Simulated AccountConfusion exploit for SOL-021 (Unprotected Mint Authority). Config: RPC=https://api.devnet.solana.com, simulate_only=true, compute_budget=200000"
+    },
+    "vuln_type": "Unprotected Mint Authority",
+    "vulnerable_code": "/* ACCOUNTS_STRUCT: CreateMintMap */\n#[derive (Accounts)] #[instruction (seed_pk : Pubkey , seed_id : u64 , bump : u8 , scope_chains : Vec<[u16 ; 4] >,)] pub struct CreateMintMap < 'info> { #[account (mut)] pub admin : Signer<'info> , #[account (has_one = admin)] pub configuration : AccountLoader<'info, crate :: states :: Configuration > , #[account (init, seeds = [seeds :: MINTS_TO_SCOPE_CHAINS , configuration . load () ?. oracle_prices . as_ref () , seed_pk . as_ref () , & seed_id . to_le_bytes ()] , bump , space = 8 + MintsToScopeChains :: size_from_len (scope_chains . len ()) , payer = admin ,)] pub mappings : Account<'info, MintsToScopeChains > , pub system_program : Program<'info, System> , }\n/* HANDLER: */\npub fn process (ctx : Context<CreateMintMap > , seed_pk : Pubkey , seed_id : u64 , bump : u8 , scope_chains : Vec<[u16 ; 4] > ,) -> Result<() > { require_eq ! (ctx . remaining_accounts . len () , scope_chains . len ()) ; ctx . accounts . mappings . set_inner (MintsToScopeChains { seed_pk , seed_id , bump , oracle_prices : ctx . accounts . configuration . load () ? . oracle_prices , mapping : scope_chains . iter () . zip (ctx . remaining_accounts . iter ()) . map (| (chain , mint) | { let mint_data = mint . data . borrow () ; let _ : Mint = Mint :: try_deserialize_unchecked (& mut mint_data . as_ref ()) ? ; Ok (MintToScopeChain { mint : * mint . key , scope_chain : * chain , }) }) . collect :: < Result<Vec<_ > > > () ? , }) ; Ok (()) }"
+  },
+  {
+    "attack_scenario": "Attacker calls the mint instruction bypassing authority checks. If the mint is PDA-controlled, the program signs with invoke_signed, minting tokens to the attacker. They then sell the freshly minted tokens on a DEX, crashing the token price and profiting.",
+    "category": "Token Security",
+    "confidence": 75,
+    "cwe": "CWE-269",
+    "description": "A `mint_to` CPI is performed without validating the mint authority as a `Signer<'info>`. Anyone can call this instruction and mint unlimited tokens. The SPL Token program requires the mint authority to sign the transaction, but if a PDA is the mint authority, the instruction handler must verify that the caller is authorized to trigger the PDA-signed mint.",
+    "function_name": "process",
+    "id": "SOL-031",
+    "line_number": 34,
+    "location": "handler_create_mint_map.rs",
+    "poc": {
+      "attack_steps": [
+        {
+          "action_type": "Setup",
+          "code_snippet": "/* ACCOUNTS_STRUCT: CreateMintMap */\n#[derive (Accounts)] #[instruction (seed_pk : Pubkey , seed_id : u64 , bump : u8 , scope_chains : Vec<[u16 ; 4] >,)] pub struct CreateMintMap < 'info> { #[account (mut)] pub admin : Signer<'info> , #[account (has_one = admin)] pub configuration : AccountLoader<'info, crate :: states :: Configuration > , #[account (init, seeds = [seeds :: MINTS_TO_SCOPE_CHAINS , configuration . load () ?. oracle_prices . as_ref () , seed_pk . as_ref () , & seed_id . to_le_bytes ()] , bump , space = 8 + MintsToScopeChains :: size_from_len (scope_chains . len ()) , payer = admin ,)] pub mappings : Account<'info, MintsToScopeChains > , pub system_program : Program<'info, System> , }\n/* HANDLER: */\npub fn process (ctx : Context<CreateMintMap > , seed_pk : Pubkey , seed_id : u64 , bump : u8 , scope_chains : Vec<[u16 ; 4] > ,) -> Result<() > { require_eq ! (ctx . remaining_accounts . len () , scope_chains . len ()) ; ctx . accounts . mappings . set_inner (MintsToScopeChains { seed_pk , seed_id , bump , oracle_prices : ctx . accounts . configuration . load () ? . oracle_prices , mapping : scope_chains . iter () . zip (ctx . remaining_accounts . iter ()) . map (| (chain , mint) | { let mint_data = mint . data . borrow () ; let _ : Mint = Mint :: try_deserialize_unchecked (& mut mint_data . as_ref ()) ? ; Ok (MintToScopeChain { mint : * mint . key , scope_chain : * chain , }) }) . collect :: < Result<Vec<_ > > > () ? , }) ; Ok (()) }",
+          "description": "Analyze vulnerable function: process",
+          "step_number": 1
+        },
+        {
+          "action_type": "Transaction",
+          "code_snippet": null,
+          "description": "Construct malicious transaction",
+          "step_number": 2
+        },
+        {
+          "action_type": "Exploitation",
+          "code_snippet": null,
+          "description": "Execute exploit and extract value",
+          "step_number": 3
+        }
+      ],
+      "difficulty": "Trivial",
+      "economic_impact": "CRITICAL - Severe financial impact",
+      "expected_outcome": "Vulnerability exploited: A `mint_to` CPI is performed without validating the mint authority as a `Signer<'info>`. Anyone can call this instruction and mint unlimited tokens. The SPL Token program requires the mint authority to sign the transaction, but if a PDA is the mint authority, the instruction handler must verify that the caller is authorized to trigger the PDA-signed mint.",
+      "mitigations": [
+        "Gate all mint operations behind Signer-validated authority checks. Consider implementing supply caps for fixed-supply tokens."
+      ],
+      "prerequisites": [
+        "Access to handler_create_mint_map.rs"
+      ],
+      "rust_poc": null,
+      "scenario_name": "SOL-031: Unauthorized Token Mint",
+      "typescript_poc": null,
+      "vulnerability_id": "SOL-031"
+    },
+    "prevention": "Gate all mint operations behind Signer-validated authority checks. Consider implementing supply caps for fixed-supply tokens.",
+    "real_world_incident": null,
+    "secure_fix": "Validate mint authority: `pub mint_authority: Signer<'info>` with `has_one = mint_authority` on the config account. For PDA-minted tokens, require an admin Signer and enforce supply caps.",
+    "severity": 5,
+    "severity_label": "CRITICAL",
+    "simulation": {
+      "rpc": "https://api.devnet.solana.com",
+      "simulate_only": true,
+      "status": "simulated",
+      "summary": "Simulated AccountConfusion exploit for SOL-031 (Unauthorized Token Mint). Config: RPC=https://api.devnet.solana.com, simulate_only=true, compute_budget=200000"
+    },
+    "vuln_type": "Unauthorized Token Mint",
+    "vulnerable_code": "/* ACCOUNTS_STRUCT: CreateMintMap */\n#[derive (Accounts)] #[instruction (seed_pk : Pubkey , seed_id : u64 , bump : u8 , scope_chains : Vec<[u16 ; 4] >,)] pub struct CreateMintMap < 'info> { #[account (mut)] pub admin : Signer<'info> , #[account (has_one = admin)] pub configuration : AccountLoader<'info, crate :: states :: Configuration > , #[account (init, seeds = [seeds :: MINTS_TO_SCOPE_CHAINS , configuration . load () ?. oracle_prices . as_ref () , seed_pk . as_ref () , & seed_id . to_le_bytes ()] , bump , space = 8 + MintsToScopeChains :: size_from_len (scope_chains . len ()) , payer = admin ,)] pub mappings : Account<'info, MintsToScopeChains > , pub system_program : Program<'info, System> , }\n/* HANDLER: */\npub fn process (ctx : Context<CreateMintMap > , seed_pk : Pubkey , seed_id : u64 , bump : u8 , scope_chains : Vec<[u16 ; 4] > ,) -> Result<() > { require_eq ! (ctx . remaining_accounts . len () , scope_chains . len ()) ; ctx . accounts . mappings . set_inner (MintsToScopeChains { seed_pk , seed_id , bump , oracle_prices : ctx . accounts . configuration . load () ? . oracle_prices , mapping : scope_chains . iter () . zip (ctx . remaining_accounts . iter ()) . map (| (chain , mint) | { let mint_data = mint . data . borrow () ; let _ : Mint = Mint :: try_deserialize_unchecked (& mut mint_data . as_ref ()) ? ; Ok (MintToScopeChain { mint : * mint . key , scope_chain : * chain , }) }) . collect :: < Result<Vec<_ > > > () ? , }) ; Ok (()) }"
+  },
+  {
+    "attack_scenario": "Due to conditional branching, there is a path to the CPI Call that skips the authorization check. An attacker can craft inputs that take this path.",
+    "category": "Authorization",
+    "confidence": 75,
+    "cwe": "CWE-862",
+    "description": "CFG dominator analysis proves that the CPI Call at line 79 in `refresh_chainlink_price` is NOT dominated by any authorization check. This means there exists at least one execution path from function entry to this operation that bypasses all authorization. (1 auth check blocks found, none dominate block 6).",
+    "function_name": "refresh_chainlink_price",
+    "id": "SOL-CFG-01",
+    "line_number": 79,
+    "location": "handler_refresh_chainlink_price.rs",
+    "poc": {
+      "attack_steps": [
+        {
+          "action_type": "Setup",
+          "code_snippet": "invoke(",
+          "description": "Analyze vulnerable function: refresh_chainlink_price",
+          "step_number": 1
+        },
+        {
+          "action_type": "Transaction",
+          "code_snippet": null,
+          "description": "Construct malicious transaction",
+          "step_number": 2
+        },
+        {
+          "action_type": "Exploitation",
+          "code_snippet": null,
+          "description": "Execute exploit and extract value",
+          "step_number": 3
+        }
+      ],
+      "difficulty": "Trivial",
+      "economic_impact": "CRITICAL - Severe financial impact",
+      "expected_outcome": "Vulnerability exploited: CFG dominator analysis proves that the CPI Call at line 79 in `refresh_chainlink_price` is NOT dominated by any authorization check. This means there exists at least one execution path from function entry to this operation that bypasses all authorization. (1 auth check blocks found, none dominate block 6).",
+      "mitigations": [
+        "Ensure authorization checks dominate all sensitive operations."
+      ],
+      "prerequisites": [
+        "Access to handler_refresh_chainlink_price.rs"
+      ],
+      "rust_poc": null,
+      "scenario_name": "SOL-CFG-01: CPI Call Not Dominated by Auth Check",
+      "typescript_poc": null,
+      "vulnerability_id": "SOL-CFG-01"
+    },
+    "prevention": "Ensure authorization checks dominate all sensitive operations.",
+    "real_world_incident": null,
+    "secure_fix": "Move the authorization check before the branch, or add it to each branch that reaches the sensitive operation. The check must DOMINATE the operation in the CFG.",
+    "severity": 5,
+    "severity_label": "CRITICAL",
+    "simulation": {
+      "rpc": "https://api.devnet.solana.com",
+      "simulate_only": true,
+      "status": "simulated",
+      "summary": "Simulated AccountConfusion exploit for SOL-CFG-01 (CPI Call Not Dominated by Auth Check). Config: RPC=https://api.devnet.solana.com, simulate_only=true, compute_budget=200000"
+    },
+    "vuln_type": "CPI Call Not Dominated by Auth Check",
+    "vulnerable_code": "invoke("
+  },
+  {
+    "attack_scenario": "Admin key is compromised (phishing, leaked private key). Attacker immediately sets fee to 100%, drains all funds, and changes authority — all in a single transaction. Users have no time to react.",
+    "category": "Governance Security",
+    "confidence": 60,
+    "cwe": "CWE-269",
+    "description": "Admin/authority can change critical protocol parameters (fees, authority, config) without a timelock or governance delay. A compromised admin key can instantly rug-pull users.",
+    "function_name": "set_admin_cached",
+    "id": "SOL-064",
+    "line_number": 99,
+    "location": "lib.rs",
+    "poc": {
+      "attack_steps": [
+        {
+          "action_type": "Setup",
+          "code_snippet": "pub fn set_admin_cached (ctx : Context<SetAdminCached > , new_admin : Pubkey , feed_name : String ,) -> Result<() > { handler_set_admin_cached :: process (ctx , new_admin , feed_name) }",
+          "description": "Analyze vulnerable function: set_admin_cached",
+          "step_number": 1
+        },
+        {
+          "action_type": "Transaction",
+          "code_snippet": null,
+          "description": "Construct malicious transaction",
+          "step_number": 2
+        },
+        {
+          "action_type": "Exploitation",
+          "code_snippet": null,
+          "description": "Execute exploit and extract value",
+          "step_number": 3
+        }
+      ],
+      "difficulty": "Easy",
+      "economic_impact": "HIGH - Significant financial impact",
+      "expected_outcome": "Vulnerability exploited: Admin/authority can change critical protocol parameters (fees, authority, config) without a timelock or governance delay. A compromised admin key can instantly rug-pull users.",
+      "mitigations": [
+        "All admin operations should have timelocks (>= 24h). Use multisig wallets. Implement two-step authority transfers."
+      ],
+      "prerequisites": [
+        "Access to lib.rs"
+      ],
+      "rust_poc": null,
+      "scenario_name": "SOL-064: Governance/Timelock Bypass",
+      "typescript_poc": null,
+      "vulnerability_id": "SOL-064"
+    },
+    "prevention": "All admin operations should have timelocks (>= 24h). Use multisig wallets. Implement two-step authority transfers.",
+    "real_world_incident": null,
+    "secure_fix": "Implement two-step authority changes with timelock: propose_change → wait(DELAY) → execute_change. Use multisig for admin keys.",
+    "severity": 4,
+    "severity_label": "HIGH",
+    "simulation": {
+      "rpc": "https://api.devnet.solana.com",
+      "simulate_only": true,
+      "status": "simulated",
+      "summary": "Simulated AccountConfusion exploit for SOL-064 (Governance/Timelock Bypass). Config: RPC=https://api.devnet.solana.com, simulate_only=true, compute_budget=200000"
+    },
+    "vuln_type": "Governance/Timelock Bypass",
+    "vulnerable_code": "pub fn set_admin_cached (ctx : Context<SetAdminCached > , new_admin : Pubkey , feed_name : String ,) -> Result<() > { handler_set_admin_cached :: process (ctx , new_admin , feed_name) }"
+  },
+  {
+    "attack_scenario": "Program reads remaining_accounts[0] as a user's token account without checking owner. Attacker passes a token account they own, redirecting funds or spoofing identity.",
+    "category": "Account Validation",
+    "confidence": 60,
+    "cwe": "CWE-20",
+    "description": "The context uses `remaining_accounts` without validating the accounts' ownership, signer status, or expected keys. These accounts bypass Anchor's automatic validation, so ANY account can be passed.",
+    "function_name": "process",
+    "id": "SOL-063",
+    "line_number": 34,
+    "location": "handler_create_mint_map.rs",
+    "poc": {
+      "attack_steps": [
+        {
+          "action_type": "Setup",
+          "code_snippet": "/* ACCOUNTS_STRUCT: CreateMintMap */\n#[derive (Accounts)] #[instruction (seed_pk : Pubkey , seed_id : u64 , bump : u8 , scope_chains : Vec<[u16 ; 4] >,)] pub struct CreateMintMap < 'info> { #[account (mut)] pub admin : Signer<'info> , #[account (has_one = admin)] pub configuration : AccountLoader<'info, crate :: states :: Configuration > , #[account (init, seeds = [seeds :: MINTS_TO_SCOPE_CHAINS , configuration . load () ?. oracle_prices . as_ref () , seed_pk . as_ref () , & seed_id . to_le_bytes ()] , bump , space = 8 + MintsToScopeChains :: size_from_len (scope_chains . len ()) , payer = admin ,)] pub mappings : Account<'info, MintsToScopeChains > , pub system_program : Program<'info, System> , }\n/* HANDLER: */\npub fn process (ctx : Context<CreateMintMap > , seed_pk : Pubkey , seed_id : u64 , bump : u8 , scope_chains : Vec<[u16 ; 4] > ,) -> Result<() > { require_eq ! (ctx . remaining_accounts . len () , scope_chains . len ()) ; ctx . accounts . mappings . set_inner (MintsToScopeChains { seed_pk , seed_id , bump , oracle_prices : ctx . accounts . configuration . load () ? . oracle_prices , mapping : scope_chains . iter () . zip (ctx . remaining_accounts . iter ()) . map (| (chain , mint) | { let mint_data = mint . data . borrow () ; let _ : Mint = Mint :: try_deserialize_unchecked (& mut mint_data . as_ref ()) ? ; Ok (MintToScopeChain { mint : * mint . key , scope_chain : * chain , }) }) . collect :: < Result<Vec<_ > > > () ? , }) ; Ok (()) }",
+          "description": "Analyze vulnerable function: process",
+          "step_number": 1
+        },
+        {
+          "action_type": "Transaction",
+          "code_snippet": null,
+          "description": "Construct malicious transaction",
+          "step_number": 2
+        },
+        {
+          "action_type": "Exploitation",
+          "code_snippet": null,
+          "description": "Execute exploit and extract value",
+          "step_number": 3
+        }
+      ],
+      "difficulty": "Easy",
+      "economic_impact": "HIGH - Significant financial impact",
+      "expected_outcome": "Vulnerability exploited: The context uses `remaining_accounts` without validating the accounts' ownership, signer status, or expected keys. These accounts bypass Anchor's automatic validation, so ANY account can be passed.",
+      "mitigations": [
+        "Minimize remaining_accounts usage. When required, validate each account's owner, key, and writable/signer constraints explicitly."
+      ],
+      "prerequisites": [
+        "Access to handler_create_mint_map.rs"
+      ],
+      "rust_poc": null,
+      "scenario_name": "SOL-063: Unvalidated remaining_accounts",
+      "typescript_poc": null,
+      "vulnerability_id": "SOL-063"
+    },
+    "prevention": "Minimize remaining_accounts usage. When required, validate each account's owner, key, and writable/signer constraints explicitly.",
+    "real_world_incident": null,
+    "secure_fix": "Validate each remaining_account: check owner, key, signer status. Prefer typed accounts in the Accounts struct over remaining_accounts.",
+    "severity": 4,
+    "severity_label": "HIGH",
+    "simulation": {
+      "rpc": "https://api.devnet.solana.com",
+      "simulate_only": true,
+      "status": "simulated",
+      "summary": "Simulated AccountConfusion exploit for SOL-063 (Unvalidated remaining_accounts). Config: RPC=https://api.devnet.solana.com, simulate_only=true, compute_budget=200000"
+    },
+    "vuln_type": "Unvalidated remaining_accounts",
+    "vulnerable_code": "/* ACCOUNTS_STRUCT: CreateMintMap */\n#[derive (Accounts)] #[instruction (seed_pk : Pubkey , seed_id : u64 , bump : u8 , scope_chains : Vec<[u16 ; 4] >,)] pub struct CreateMintMap < 'info> { #[account (mut)] pub admin : Signer<'info> , #[account (has_one = admin)] pub configuration : AccountLoader<'info, crate :: states :: Configuration > , #[account (init, seeds = [seeds :: MINTS_TO_SCOPE_CHAINS , configuration . load () ?. oracle_prices . as_ref () , seed_pk . as_ref () , & seed_id . to_le_bytes ()] , bump , space = 8 + MintsToScopeChains :: size_from_len (scope_chains . len ()) , payer = admin ,)] pub mappings : Account<'info, MintsToScopeChains > , pub system_program : Program<'info, System> , }\n/* HANDLER: */\npub fn process (ctx : Context<CreateMintMap > , seed_pk : Pubkey , seed_id : u64 , bump : u8 , scope_chains : Vec<[u16 ; 4] > ,) -> Result<() > { require_eq ! (ctx . remaining_accounts . len () , scope_chains . len ()) ; ctx . accounts . mappings . set_inner (MintsToScopeChains { seed_pk , seed_id , bump , oracle_prices : ctx . accounts . configuration . load () ? . oracle_prices , mapping : scope_chains . iter () . zip (ctx . remaining_accounts . iter ()) . map (| (chain , mint) | { let mint_data = mint . data . borrow () ; let _ : Mint = Mint :: try_deserialize_unchecked (& mut mint_data . as_ref ()) ? ; Ok (MintToScopeChain { mint : * mint . key , scope_chain : * chain , }) }) . collect :: < Result<Vec<_ > > > () ? , }) ; Ok (()) }"
+  },
+  {
+    "attack_scenario": "Attacker creates an account with crafted data that mimics the expected layout. Without discriminator checking, the program interprets this data as valid, leading to unauthorized operations.",
+    "category": "Account Safety",
+    "confidence": 58,
+    "cwe": "CWE-704",
+    "description": "Account `perpetuals` in `GetAssetsUnderManagement` uses raw `AccountInfo` which provides no type safety or discriminator checking. The account data can contain anything — including data from a completely different program.",
+    "function_name": "GetAssetsUnderManagement",
+    "id": "SOL-ALIAS-02",
+    "line_number": 40,
+    "location": "lib.rs",
+    "poc": {
+      "attack_steps": [
+        {
+          "action_type": "Setup",
+          "code_snippet": "pub perpetuals: AccountInfo<'info>",
+          "description": "Analyze vulnerable function: GetAssetsUnderManagement",
+          "step_number": 1
+        },
+        {
+          "action_type": "Transaction",
+          "code_snippet": null,
+          "description": "Construct malicious transaction",
+          "step_number": 2
+        },
+        {
+          "action_type": "Exploitation",
+          "code_snippet": null,
+          "description": "Execute exploit and extract value",
+          "step_number": 3
+        }
+      ],
+      "difficulty": "Easy",
+      "economic_impact": "HIGH - Significant financial impact",
+      "expected_outcome": "Vulnerability exploited: Account `perpetuals` in `GetAssetsUnderManagement` uses raw `AccountInfo` which provides no type safety or discriminator checking. The account data can contain anything — including data from a completely different program.",
+      "mitigations": [
+        "Always use typed accounts with discriminator validation."
+      ],
+      "prerequisites": [
+        "Access to lib.rs"
+      ],
+      "rust_poc": null,
+      "scenario_name": "SOL-ALIAS-02: Raw AccountInfo Without Type Safety",
+      "typescript_poc": null,
+      "vulnerability_id": "SOL-ALIAS-02"
+    },
+    "prevention": "Always use typed accounts with discriminator validation.",
+    "real_world_incident": {
+      "date": "2022-02-02",
+      "loss": "$320M",
+      "project": "Wormhole Bridge"
+    },
+    "secure_fix": "Replace `AccountInfo` with a typed Anchor account: `Account<'info, YourType>` which automatically validates the discriminator and owner.",
+    "severity": 4,
+    "severity_label": "HIGH",
+    "simulation": {
+      "rpc": "https://api.devnet.solana.com",
+      "simulate_only": true,
+      "status": "simulated",
+      "summary": "Simulated AccountConfusion exploit for SOL-ALIAS-02 (Raw AccountInfo Without Type Safety). Config: RPC=https://api.devnet.solana.com, simulate_only=true, compute_budget=200000"
+    },
+    "vuln_type": "Raw AccountInfo Without Type Safety",
+    "vulnerable_code": "pub perpetuals: AccountInfo<'info>"
+  },
+  {
+    "attack_scenario": "Attacker creates a fake account with the same discriminator as the expected type but different data. Since `pyth_storage` has no ownership check, the instruction processes the attacker's account instead.",
+    "category": "Authorization",
+    "confidence": 55,
+    "cwe": "CWE-284",
+    "description": "Field `pyth_storage` in `RefreshPythLazerPrice` is a data account (`Account<'info, T>`) without `has_one`, `constraint`, or `owner` validation. An attacker can substitute a different account of the same type (type cosplay) to manipulate account state. [found in 3 locations; also in: handler_refresh_chainlink_price.rs:RefreshChainlinkPrice, lib.rs:GetAssetsUnderManagement]",
+    "fix": {
+      "diff": "- pub pyth_storage: Account<'info, pyth_lazer_solana_contract::Storage>,\n+ #[derive(Accounts)]",
+      "explanation": "Apply the 'Owner Validation' pattern: Validates account owner",
+      "fixed_code": "\n#[derive(Accounts)]\npub struct SecureAccounts<'info> {\n    #[account(\n        constraint = my_account.owner == expected_program_id @ ErrorCode::InvalidOwner\n    )]\n    pub my_account: Account<'info, MyData>,\n}\n",
+      "original_code": "pub pyth_storage: Account<'info, pyth_lazer_solana_contract::Storage>,",
+      "vulnerability_id": "SOL-003"
+    },
+    "function_name": "RefreshPythLazerPrice",
+    "id": "SOL-003",
+    "line_number": 39,
+    "location": "handler_refresh_pyth_lazer_price.rs",
+    "poc": {
+      "attack_steps": [
+        {
+          "action_type": "Setup",
+          "code_snippet": null,
+          "description": "Create account with same data layout as expected account",
+          "step_number": 1
+        },
+        {
+          "action_type": "StateManipulation",
+          "code_snippet": null,
+          "description": "Initialize with malicious data (e.g., attacker as authority)",
+          "step_number": 2
+        },
+        {
+          "action_type": "Exploitation",
+          "code_snippet": null,
+          "description": "Pass fake account to vulnerable instruction",
+          "step_number": 3
+        }
+      ],
+      "difficulty": "Medium",
+      "economic_impact": "CRITICAL - Complete authority bypass possible",
+      "expected_outcome": "Program processes fake account, leading to unauthorized actions",
+      "mitigations": [
+        "Add owner = program_id constraint in Anchor",
+        "Verify account.owner == expected_program_id",
+        "Use Account<'info, T> for typed account access"
+      ],
+      "prerequisites": [
+        "Deploy malicious program with matching account structure",
+        "Initialize account with crafted data"
+      ],
+      "rust_poc": null,
+      "scenario_name": "SOL-003: Missing Owner Check in RefreshPythLazerPrice",
+      "typescript_poc": "import * as anchor from \"@coral-xyz/anchor\";\n\ndescribe(\"SOL-003 Exploit: Missing Owner Check\", () => {\n  it(\"substitutes fake account owned by attacker\", async () => {\n    // 1. Create a fake account with same data structure\n    const fakeAccount = anchor.web3.Keypair.generate();\n    \n    // 2. Initialize fake account with malicious data\n    // The fake account mimics a legitimate vault but is owned by attacker's program\n    \n    // 3. Call target instruction with fake account\n    const tx = await program.methods\n      .RefreshPythLazerPrice()\n      .accounts({\n        vault: fakeAccount.publicKey, // Fake account instead of real vault\n        // ... other accounts\n      })\n      .rpc();\n    \n    // Attack succeeds because program didn't verify account owner\n  });\n});",
+      "vulnerability_id": "SOL-003"
+    },
+    "prevention": "All data accounts must validate ownership via has_one or constraint.",
+    "real_world_incident": {
+      "date": "2022-03-23",
+      "loss": "$52M",
+      "project": "Cashio"
+    },
+    "secure_fix": "Add `#[account(has_one = authority @ ErrorCode::Unauthorized)]` to the `pyth_storage` field.",
+    "severity": 4,
+    "severity_label": "HIGH",
+    "simulation": {
+      "rpc": "https://api.devnet.solana.com",
+      "simulate_only": true,
+      "status": "simulated",
+      "summary": "Simulated AccountConfusion exploit for SOL-003 (Missing Owner/Authority Validation). Config: RPC=https://api.devnet.solana.com, simulate_only=true, compute_budget=200000"
+    },
+    "vuln_type": "Missing Owner/Authority Validation",
+    "vulnerable_code": "pub pyth_storage: Account<'info, pyth_lazer_solana_contract::Storage>,"
+  }
+]

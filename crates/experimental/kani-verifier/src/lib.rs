@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! # Kani-Style Invariant Verification (Z3 Fallback)
 //!
 //! This crate extracts program invariants from Solana/Anchor source code and

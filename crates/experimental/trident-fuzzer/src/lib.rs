@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! - **Full Ledger Simulation**: Trident simulates the entire Solana ledger state
 //!   (accounts, PDAs, token mints, CPIs) — not just individual functions.
 //! - **Stateful Fuzzing**: Inputs are generated based on critical account state
@@ -60,7 +61,7 @@ pub use report::{TridentFinding, TridentFuzzReport, TridentSeverity};
 ///
 /// Orchestrates: source extraction → harness generation → fuzz execution →
 /// crash analysis → report generation.
-#[allow(dead_code)]
+
 pub struct TridentFuzzer {
     config: TridentConfig,
     extractor: anchor_extractor::AnchorExtractor,

@@ -56,7 +56,7 @@ impl Default for CPIGuardDetector {
 
 /// Tracks program-type fields found in Accounts structs
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
+
 struct ProgramField {
     struct_name: String,
     field_name: String,

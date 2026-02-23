@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! # FV Layer 2 — Symbolic Execution Verifier
 //!
 //! Performs MIR-level symbolic execution with Z3 backend verification.

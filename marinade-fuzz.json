@@ -1,0 +1,23 @@
+{
+  "elapsed_secs": 0.142697402,
+  "fuzzing": [
+    {
+      "critical": 0,
+      "engine": "trident",
+      "findings": 32,
+      "high": 32,
+      "iterations": 0
+    },
+    {
+      "engine": "fuzzdelsol",
+      "reason": "no binary",
+      "status": "skipped"
+    },
+    {
+      "coverage_pct": 0.0,
+      "engine": "security-fuzzer",
+      "findings": 0,
+      "total_executions": 0
+    }
+  ]
+}

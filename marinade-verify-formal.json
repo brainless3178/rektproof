@@ -1,0 +1,47 @@
+{
+  "elapsed_secs": 100.619484087,
+  "formal_verification": [
+    {
+      "engine": "kani",
+      "failed_properties": 182,
+      "status": "InvariantViolation",
+      "verified_properties": 0
+    },
+    {
+      "engine": "certora",
+      "error": "BuildError(\"No .so file found after cargo build-sbf\")",
+      "status": "error"
+    },
+    {
+      "engine": "wacana",
+      "findings": 0,
+      "paths_explored": 0
+    },
+    {
+      "engine": "crux-mir",
+      "findings": 64,
+      "instructions_analyzed": 29
+    },
+    {
+      "duration_ms": 74713,
+      "engine": "fv-scanner",
+      "layer1": {
+        "findings": 356,
+        "status": "Failed"
+      },
+      "layer2": {
+        "proofs": 144
+      },
+      "layer3": {
+        "invariants_checked": 0,
+        "status": "Verified",
+        "violations": 0
+      },
+      "layer4": {
+        "state_transitions": 2,
+        "status": "VIOLATIONS — 1 state transition properties failed"
+      },
+      "scan_id": "scan_1771849965"
+    }
+  ]
+}

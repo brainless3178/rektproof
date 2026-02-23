@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! Consensus Engine for Multi-LLM Verification
 //!
 //! Uses multiple LLMs to verify vulnerability findings through voting.

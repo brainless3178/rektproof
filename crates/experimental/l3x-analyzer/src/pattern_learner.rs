@@ -40,7 +40,7 @@ pub struct PatternLearner {
 }
 
 #[derive(Clone)]
-#[allow(dead_code)]
+
 struct ExploitPattern {
     name: String,
     pattern_regex: regex::Regex,

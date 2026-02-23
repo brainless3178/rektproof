@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! Git Scanner - For scanning Git repositories
 //!
 //! Handles cloning of remote Solana program repositories for automated audits.

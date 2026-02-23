@@ -32,7 +32,7 @@ struct CFGNode {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-#[allow(dead_code)]
+
 enum NodeType {
     FunctionEntry,
     Statement,
@@ -45,7 +45,7 @@ enum NodeType {
 }
 
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
+
 enum EdgeType {
     Sequential,
     ConditionalTrue,

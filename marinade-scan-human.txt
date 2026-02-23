@@ -1,0 +1,150 @@
+  ┌──────────────────────────────────────────────────────────────────────────────┐
+  │  #1    CRITICAL   SOL-001  ████████░░ 82%                                    │
+  │   → Missing Signer Validation                                                │
+  │   @  /tmp/marinade-liquid-staking/programs/marinade-finance/src/instructions/user/withdraw_stake_account.rs  ·  fn WithdrawStakeAccount::stake_withdraw_authority  ·  L71  ·  CWE-862 │
+  ├──────────────────────────────────────────────────────────────────────────────┤
+  │   Field `stake_withdraw_authority` in `WithdrawStakeAccount` is a            │
+  │   privileged role (UncheckedAccount) using `UncheckedAccount` without        │
+  │   signer enforcement. The Solana runtime does not check `is_signer` unless   │
+  │   the program explicitly validates it. An attacker can pass any pubkey as    │
+  │   `stake_withdraw_authority` and execute privileged operations. Use          │
+  │   `Signer<'info>` instead of `AccountInfo<'info>`, or add                    │
+  │   `#[account(signer)]`. Without signer validation, the Solana runtime        │
+  │   allows any account to be passed in the authority position. An attacker     │
+  │   constructs a transaction with their own pubkey as the authority field      │
+  │   and the runtime will not reject it. This is the most common Solana         │
+  │   vulnerability pattern -- the Wormhole bridge exploit ($320M) was caused    │
+  │   by a missing signer check on the guardian set update. [found in 12         │
+  │   locations; also in:                                                        │
+  │   deposit_stake_account.rs:DepositStakeAccount::msol_mint_authority,         │
+  │   deposit.rs:Deposit::liq_pool_msol_leg_authority,                           │
+  │   partial_unstake.rs:PartialUnstake::stake_deposit_authority,                │
+  │   emergency_unstake.rs:EmergencyUnstake::stake_deposit_authority,            │
+  │   remove_liquidity.rs:RemoveLiquidity::liq_pool_msol_leg_authority,          │
+  │   add_liquidity.rs:AddLiquidity::lp_mint_authority,                          │
+  │   update.rs:UpdateCommon::stake_withdraw_authority,                          │
+  │   stake_reserve.rs:StakeReserve::stake_deposit_authority,                    │
+  │   redelegate.rs:ReDelegate::stake_deposit_authority,                         │
+  │   merge_stakes.rs:MergeStakes::stake_deposit_authority,                      │
+  │   deactivate_stake.rs:DeactivateStake::stake_deposit_authority]              │
+  │                                                                              │
+  │   ▎ Code                                                                     │
+  │     69: bump = state.stake_system.stake_withdraw_bump_seed ↩ 70: )] ↩        │
+  │     71: pub stake_withdraw_authorit…                                         │
+  │                                                                              │
+  │   -> Attack Scenario                                                         │
+  │     Attacker passes a target account without signing, bypassing authority    │
+  │     checks. This allows unauthorized state modifications, fund transfers,    │
+  │     and ownership changes.                                                   │
+  ├──────────────────────────────────────────────────────────────────────────────┤
+  │   ✏ Recommended Fix                                                          │
+  │     Replace `AccountInfo<'info>` with `Signer<'info>`: ```rust pub           │
+  │     stake_withdraw_authority: Signer<'info>, ``` Or add the signer           │
+  │     constraint: ```rust #[account(signer)] pub stake_withdraw_authority:     │
+  │     AccountInfo<'info>, ```                                                  │
+  └──────────────────────────────────────────────────────────────────────────────┘
+
+  ┌──────────────────────────────────────────────────────────────────────────────┐
+  │  #2    CRITICAL   SOL-017  ███████░░░ 77%                                    │
+  │   → Missing CPI Guard                                                        │
+  │   @  /tmp/marinade-liquid-staking/programs/marinade-finance/src/instructions/user/withdraw_stake_account.rs  ·  fn unknown  ·  L264  ·  CWE-346 │
+  ├──────────────────────────────────────────────────────────────────────────────┤
+  │   Line 264: Raw `invoke_signed()` call without prior program ID              │
+  │   validation. The CPI target program is passed by the caller as an           │
+  │   `AccountInfo`. Without checking `program.key() == expected_program::ID`,   │
+  │   an attacker substitutes a malicious program that mimics the expected       │
+  │   instruction interface. Use Anchor's `CpiContext` with `Program<'info,      │
+  │   T>` instead, or add `require!(program.key() == expected::ID)` before the   │
+  │   invoke call. Raw CPI via invoke/invoke_signed passes whatever program      │
+  │   Account the caller provides. The Solana runtime does not validate that     │
+  │   the target program is the one the developer intended. This is the          │
+  │   primary CPI attack vector on Solana. [found in 7 locations; also in:       │
+  │   deposit_stake_account.rs:unknown, partial_unstake.rs:unknown,              │
+  │   stake_reserve.rs:unknown, redelegate.rs:unknown,                           │
+  │   merge_stakes.rs:unknown, deactivate_stake.rs:unknown]                      │
+  │                                                                              │
+  │   ▎ Code                                                                     │
+  │     261: .last() ↩ 262: .unwrap() ↩ 263: .clone(); ↩ 264:                    │
+  │     invoke_signed( ↩ 265: …                                                  │
+  ├──────────────────────────────────────────────────────────────────────────────┤
+  │   ✏ Recommended Fix                                                          │
+  │     Replace raw invoke with Anchor's typed CPI: ```rust // In Accounts       │
+  │     struct: pub token_program: Program<'info, Token>, // In handler:         │
+  │     token::transfer(                                                         │
+  │     CpiContext::new(ctx.accounts.token_program.to_account_info(), ...),      │
+  │     amount, )?; ```                                                          │
+  └──────────────────────────────────────────────────────────────────────────────┘
+
+  ┌──────────────────────────────────────────────────────────────────────────────┐
+  │  #3      HIGH     SOL-082  ██████░░░░ 67%                                    │
+  │   → Missing has_one Constraint                                               │
+  │   @  /tmp/marinade-liquid-staking/programs/marinade-finance/src/instructions/user/withdraw_stake_account.rs  ·  fn WithdrawStakeAccount::burn_msol_authority  ·  L46  ·  CWE-862 │
+  ├──────────────────────────────────────────────────────────────────────────────┤
+  │   Field `burn_msol_authority` in `WithdrawStakeAccount` is a `Signer` but    │
+  │   no state account in this struct uses `#[account(has_one =                  │
+  │   burn_msol_authority)]` to verify ownership. This means ANY valid wallet    │
+  │   can call this instruction as the `burn_msol_authority`. Add `has_one =     │
+  │   burn_msol_authority` to the relevant state/vault/pool account to bind      │
+  │   the signer to stored authority. A Signer constraint only proves that the   │
+  │   wallet signed the transaction. It does NOT prove the signer is the         │
+  │   authorized authority for a specific account. Without `has_one`, any        │
+  │   wallet that signs can act as the authority. The `has_one` constraint       │
+  │   makes Anchor compare `state_account.authority == signer.key()` during      │
+  │   deserialization. [found in 13 locations; also in:                          │
+  │   deposit_stake_account.rs:DepositStakeAccount::stake_authority,             │
+  │   set_validator_score.rs:SetValidatorScore::manager_authority,               │
+  │   remove_validator.rs:RemoveValidator::manager_authority,                    │
+  │   partial_unstake.rs:PartialUnstake::validator_manager_authority,            │
+  │   emergency_unstake.rs:EmergencyUnstake::validator_manager_authority,        │
+  │   add_validator.rs:AddValidator::manager_authority,                          │
+  │   remove_liquidity.rs:RemoveLiquidity::burn_from_authority,                  │
+  │   liquid_unstake.rs:LiquidUnstake::get_msol_from_authority,                  │
+  │   order_unstake.rs:OrderUnstake::burn_msol_authority,                        │
+  │   stake_reserve.rs:StakeReserve::rent_payer,                                 │
+  │   redelegate.rs:ReDelegate::split_stake_rent_payer,                          │
+  │   deactivate_stake.rs:DeactivateStake::split_stake_rent_payer]               │
+  │                                                                              │
+  │   ▎ Code                                                                     │
+  │     44: pub burn_msol_from: Box<Account<'info, TokenAccount>>, ↩ 45:         │
+  │     #[account(mut)] ↩ 46: pub burn_msol_…                                    │
+  ├──────────────────────────────────────────────────────────────────────────────┤
+  │   ✏ Recommended Fix                                                          │
+  │     Add `has_one = burn_msol_authority` to the state account that stores     │
+  │     this authority: ```rust #[account(mut, has_one = burn_msol_authority @   │
+  │     ErrorCode::Unauthorized)] pub vault: Account<'info, VaultState>, ```     │
+  └──────────────────────────────────────────────────────────────────────────────┘
+
+  ┌──────────────────────────────────────────────────────────────────────────────┐
+  │  #4      HIGH     SOL-073  ██████░░░░ 67%                                    │
+  │   → Missing PDA Validation                                                   │
+  │   @  /tmp/marinade-liquid-staking/programs/marinade-finance/src/instructions/user/withdraw_stake_account.rs  ·  fn WithdrawStakeAccount::split_stake_account  ·  L90  ·  CWE-20 │
+  ├──────────────────────────────────────────────────────────────────────────────┤
+  │   Field `split_stake_account` in `WithdrawStakeAccount` uses                 │
+  │   `#[account(init)]` on a custom Account type without `seeds` derivation.    │
+  │   If this account should be unique per user/mint/pool, it MUST be a PDA      │
+  │   with appropriate seeds. Without seeds, the account address is determined   │
+  │   by the caller's keypair, meaning: - No uniqueness enforcement (two         │
+  │   callers can create separate accounts) - No deterministic address           │
+  │   derivation (other instructions can't find it) Add `seeds = [b"prefix",     │
+  │   user.key().as_ref()], bump` for per-user PDAs. Without PDA seed            │
+  │   derivation, account addresses are not deterministic. Other instructions    │
+  │   cannot reliably locate the account, and there is no on-chain enforcement   │
+  │   that the account belongs to a specific user, mint, or pool. This breaks    │
+  │   composability and opens the door for account substitution attacks.         │
+  │   [found in 5 locations; also in:                                            │
+  │   partial_unstake.rs:PartialUnstake::split_stake_account,                    │
+  │   stake_reserve.rs:StakeReserve::stake_account,                              │
+  │   redelegate.rs:ReDelegate::split_stake_account,                             │
+  │   deactivate_stake.rs:DeactivateStake::split_stake_account]                  │
+  │                                                                              │
+  │   ▎ Code                                                                     │
+  │     88: owner = stake::program::ID, ↩ 89: )] ↩ 90: pub                       │
+  │     split_stake_account: Account<'info, StakeAccou…                          │
+  ├──────────────────────────────────────────────────────────────────────────────┤
+  │   ✏ Recommended Fix                                                          │
+  │     Add seed derivation to create a deterministic, per-user PDA: ```rust     │
+  │     #[account( init, seeds = [b"state", user.key().as_ref()], bump, payer    │
+  │     = user, space = 8 + std::mem::size_of::<StateAccount>(), )] pub          │
+  │     split_stake_account: Account<'info, StateAccount>, ```                   │
+  └──────────────────────────────────────────────────────────────────────────────┘
+

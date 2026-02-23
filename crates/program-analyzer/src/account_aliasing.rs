@@ -503,6 +503,17 @@ fn analyze_accounts_struct(
                 continue;
             }
 
+            // (c2) Field has seeds constraint = PDA authority.
+            // PDA authorities are validated by ADDRESS DERIVATION
+            // (seeds + bump), not by signing. They should NEVER be
+            // Signer<'info> — flagging them is always a false positive.
+            let has_seeds = account.constraints.iter().any(|c| {
+                matches!(c.kind, ConstraintKind::Seeds)
+            });
+            if has_seeds {
+                continue;
+            }
+
             // (d) Field has a CHECK comment
             let has_check_comment = if account.line > 0 && account.line <= lines.len() {
                 (1..=3).any(|offset| {

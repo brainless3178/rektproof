@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! Attack Simulator - Generates Executable Proof-of-Concept Exploits
 //!
 //! This module generates real, executable PoC code for vulnerabilities,
@@ -8,7 +9,7 @@ use serde::{Deserialize, Serialize};
 
 /// Core attack simulator that generates executable PoCs
 pub struct AttackSimulator {
-    #[allow(dead_code)]
+    
     config: SimulatorConfig,
 }
 

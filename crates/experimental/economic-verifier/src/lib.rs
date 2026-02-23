@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! Economic Invariant Verification for DeFi Protocols
 //!
 //! Uses Z3 SMT solver to verify critical DeFi invariants:

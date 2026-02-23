@@ -65,7 +65,7 @@ pub enum FuzzerBackend {
 // ─── Executor ────────────────────────────────────────────────────────────────
 
 /// Executes Trident fuzz campaigns against Solana programs.
-#[allow(dead_code)]
+
 pub struct TridentExecutor {
     config: TridentConfig,
     trident_available: Option<bool>,

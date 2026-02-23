@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! Concolic Execution Engine for Solana Programs
 //!
 //! Combines concrete execution with symbolic constraint collection

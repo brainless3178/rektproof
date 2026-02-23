@@ -1,0 +1,33 @@
+
+  🐛  Running fuzzing analysis on: /tmp/kamino-scan/klend/programs/klend/src
+  ├─ 🔍 Trident stateful fuzzer...
+  │  ok Trident: 0 iters, 129 findings (0 crit, 123 high)
+  ├─ 🔍 FuzzDelSol binary fuzzer...
+  │  ⏭️ FuzzDelSol: No SBF binary found, skipping
+  └─ 🔍 Coverage-guided fuzzer...
+     ok SecurityFuzzer: 0 execs, 0 findings
+
+  ok  Fuzzing completed in 0.27s
+{
+  "elapsed_secs": 0.265399616,
+  "fuzzing": [
+    {
+      "critical": 0,
+      "engine": "trident",
+      "findings": 129,
+      "high": 123,
+      "iterations": 0
+    },
+    {
+      "engine": "fuzzdelsol",
+      "reason": "no binary",
+      "status": "skipped"
+    },
+    {
+      "coverage_pct": 0.0,
+      "engine": "security-fuzzer",
+      "findings": 0,
+      "total_executions": 0
+    }
+  ]
+}

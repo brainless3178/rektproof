@@ -169,9 +169,6 @@ impl OctagonState {
         self.closed = false;
     }
 
-    fn var_idx(&self, name: &str) -> Option<usize> {
-        self.var_index.get(name).copied()
-    }
 
     /// Check if the state is ⊥ (unreachable).
     pub fn is_bottom(&self) -> bool {

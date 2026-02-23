@@ -1,0 +1,14 @@
+{
+  "elapsed": 87.181415637,
+  "findings": {
+    "critical": 2,
+    "high": 2,
+    "low": 0,
+    "medium": 0,
+    "total": 4
+  },
+  "grade": "F",
+  "guard_risk": 0,
+  "name": "/tmp/marinade-liquid-staking/programs/marinade-finance",
+  "score": 20
+}

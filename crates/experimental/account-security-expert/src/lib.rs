@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! Account Security Expert — Comprehensive Account Vulnerability Knowledge Base
 //!
 //! Covers all Solana account validation attack vectors including signer checks,
