@@ -2,19 +2,66 @@
 resolver = "2"
 
 members = [
-    # ── Production (the actual product) ──────────────────────────────
-    "crates/shanon-cli",
-    "crates/shanon-api",
-    "crates/program-analyzer",
-    "crates/shanon-guard",
-    "crates/shanon-monitor",
-    "crates/shanon-verify",
-    "crates/shanon-lsp",
-    "crates/token-security-expert",
-    "crates/firedancer-monitor",
-    "crates/cpi-analyzer",
-    "crates/ai-enhancer",
-    "crates/compliance-reporter",
+    # ── Core Engine ──────────────────────────────────────────────────
+    "crates/core/program-analyzer",
+
+    # ── Analyzers ────────────────────────────────────────────────────
+    "crates/analyzers/anchor-security-analyzer",
+    "crates/analyzers/cpi-analyzer",
+    "crates/analyzers/dataflow-analyzer",
+    "crates/analyzers/geiger-analyzer",
+    "crates/analyzers/l3x-analyzer",
+    "crates/analyzers/sec3-analyzer",
+    "crates/analyzers/symbolic-engine",
+    "crates/analyzers/concolic-executor",
+    "crates/analyzers/taint-analyzer",
+    "crates/analyzers/wacana-analyzer",
+
+    # ── Domain Experts ───────────────────────────────────────────────
+    "crates/experts/account-security-expert",
+    "crates/experts/arithmetic-security-expert",
+    "crates/experts/defi-security-expert",
+    "crates/experts/token-security-expert",
+
+    # ── Formal Verification ──────────────────────────────────────────
+    "crates/verification/fv-scanner-core",
+    "crates/verification/fv-layer1-verifier",
+    "crates/verification/fv-layer2-verifier",
+    "crates/verification/fv-layer3-verifier",
+    "crates/verification/fv-layer4-verifier",
+    "crates/verification/kani-verifier",
+    "crates/verification/certora-prover",
+    "crates/verification/crux-mir-analyzer",
+    "crates/verification/invariant-miner",
+    "crates/verification/economic-verifier",
+
+    # ── Fuzzing ──────────────────────────────────────────────────────
+    "crates/fuzzing/security-fuzzer",
+    "crates/fuzzing/trident-fuzzer",
+    "crates/fuzzing/fuzzdelsol",
+
+    # ── Exploit / Red Team ───────────────────────────────────────────
+    "crates/exploit/attack-simulator",
+    "crates/exploit/transaction-forge",
+    "crates/exploit/llm-strategist",
+
+    # ── AI / LLM ─────────────────────────────────────────────────────
+    "crates/ai/ai-enhancer",
+    "crates/ai/consensus-engine",
+    "crates/ai/secure-code-gen",
+
+    # ── Infrastructure ───────────────────────────────────────────────
+    "crates/infra/shanon-cli",
+    "crates/infra/shanon-api",
+    "crates/infra/shanon-lsp",
+    "crates/infra/shanon-guard",
+    "crates/infra/shanon-monitor",
+    "crates/infra/shanon-verify",
+    "crates/infra/firedancer-monitor",
+    "crates/infra/compliance-reporter",
+    "crates/infra/git-scanner",
+    "crates/infra/benchmark-suite",
+    "crates/infra/integration-orchestrator",
 
     # ── Solana Programs ──────────────────────────────────────────────
     "programs/shanon-oracle",
@@ -25,60 +72,21 @@ members = [
     # ── Tests ────────────────────────────────────────────────────────
     "exploits",
     "integration-tests",
-
-    # ── Analysis engine dependencies (used by shanon-cli + program-analyzer) ──
-    # These crates are imported and called from production binaries.
-    "crates/experimental/kani-verifier",
-    "crates/experimental/certora-prover",
-    "crates/experimental/wacana-analyzer",
-    "crates/experimental/symbolic-engine",
-    "crates/experimental/sec3-analyzer",
-    "crates/experimental/anchor-security-analyzer",
-    "crates/experimental/trident-fuzzer",
-    "crates/experimental/dataflow-analyzer",
-    "crates/experimental/taint-analyzer",
-    "crates/experimental/l3x-analyzer",
-    "crates/experimental/geiger-analyzer",
-    "crates/experimental/economic-verifier",
-    "crates/experimental/fuzzdelsol",
-    "crates/experimental/attack-simulator",
-    "crates/experimental/llm-strategist",
-    "crates/experimental/concolic-executor",
-    "crates/experimental/consensus-engine",
-    "crates/experimental/account-security-expert",
-    "crates/experimental/arithmetic-security-expert",
-    "crates/experimental/defi-security-expert",
-    "crates/experimental/secure-code-gen",
-    "crates/experimental/benchmark-suite",
-    "crates/experimental/integration-orchestrator",
-    "crates/experimental/crux-mir-analyzer",
-    "crates/experimental/git-scanner",
-    "crates/experimental/security-fuzzer",
-    "crates/experimental/invariant-miner",
-    "crates/experimental/transaction-forge",
-
-    # ── Formal Verification pipeline (used by shanon-cli verify-formal) ──
-    "crates/experimental/fv-layer1-verifier",
-    "crates/experimental/fv-layer2-verifier",
-    "crates/experimental/fv-layer3-verifier",
-    "crates/experimental/fv-layer4-verifier",
-    "crates/experimental/fv-scanner-core",
 ]
 
-# Default build: only production crates (fast iteration, honest scope)
 default-members = [
-    "crates/shanon-cli",
-    "crates/shanon-api",
-    "crates/program-analyzer",
-    "crates/shanon-guard",
-    "crates/shanon-monitor",
-    "crates/shanon-verify",
-    "crates/shanon-lsp",
-    "crates/token-security-expert",
-    "crates/firedancer-monitor",
-    "crates/cpi-analyzer",
-    "crates/ai-enhancer",
-    "crates/compliance-reporter",
+    "crates/core/program-analyzer",
+    "crates/infra/shanon-cli",
+    "crates/infra/shanon-api",
+    "crates/infra/shanon-guard",
+    "crates/infra/shanon-monitor",
+    "crates/infra/shanon-verify",
+    "crates/infra/shanon-lsp",
+    "crates/experts/token-security-expert",
+    "crates/infra/firedancer-monitor",
+    "crates/analyzers/cpi-analyzer",
+    "crates/ai/ai-enhancer",
+    "crates/infra/compliance-reporter",
     "programs/shanon-oracle",
     "programs/vulnerable-vault",
     "programs/vulnerable-token",

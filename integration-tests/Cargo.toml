@@ -13,7 +13,7 @@ name = "full_pipeline"
 path = "tests/full_pipeline.rs"
 
 [dependencies]
-program-analyzer = { path = "../crates/program-analyzer" }
-cpi-analyzer = { path = "../crates/cpi-analyzer" }
-consensus-engine = { path = "../crates/experimental/consensus-engine" }
+program-analyzer = { path = "../crates/core/program-analyzer" }
+cpi-analyzer = { path = "../crates/analyzers/cpi-analyzer" }
+consensus-engine = { path = "../crates/ai/consensus-engine" }
 serde_json = "1.0"

@@ -1,0 +1,53 @@
+[package]
+name = "shanon-cli"
+version.workspace = true
+edition.workspace = true
+description = "Shanon — Solana Security Platform CLI"
+
+[[bin]]
+name = "shanon"
+path = "src/main.rs"
+
+[dependencies]
+# CLI framework
+clap = { workspace = true }
+colored = { workspace = true }
+
+# Async runtime
+tokio = { workspace = true }
+serde_json = { workspace = true }
+
+# TUI Dashboard
+ratatui = "0.28"
+crossterm = "0.28"
+dotenvy = "0.15"
+
+# Internal crates
+program-analyzer = { path = "../../core/program-analyzer" }
+shanon-guard = { path = "../../infra/shanon-guard" }
+firedancer-monitor = { path = "../../infra/firedancer-monitor" }
+cpi-analyzer = { path = "../../analyzers/cpi-analyzer" }
+token-security-expert = { path = "../../experts/token-security-expert" }
+shanon-monitor = { path = "../../infra/shanon-monitor" }
+compliance-reporter = { path = "../../infra/compliance-reporter" }
+shanon-verify = { path = "../../infra/shanon-verify" }
+ai-enhancer = { path = "../../ai/ai-enhancer" }
+secure-code-gen = { path = "../../ai/secure-code-gen" }
+attack-simulator = { path = "../../exploit/attack-simulator" }
+transaction-forge = { path = "../../exploit/transaction-forge" }
+git-scanner = { path = "../../infra/git-scanner" }
+llm-strategist = { path = "../../exploit/llm-strategist" }
+consensus-engine = { path = "../../ai/consensus-engine" }
+benchmark-suite = { path = "../../infra/benchmark-suite" }
+integration-orchestrator = { path = "../../infra/integration-orchestrator" }
+kani-verifier = { path = "../../verification/kani-verifier" }
+certora-prover = { path = "../../verification/certora-prover" }
+wacana-analyzer = { path = "../../analyzers/wacana-analyzer" }
+economic-verifier = { path = "../../verification/economic-verifier" }
+trident-fuzzer = { path = "../../fuzzing/trident-fuzzer" }
+fuzzdelsol = { path = "../../fuzzing/fuzzdelsol" }
+crux-mir-analyzer = { path = "../../verification/crux-mir-analyzer" }
+fv-scanner-core = { path = "../../verification/fv-scanner-core" }
+concolic-executor = { path = "../../analyzers/concolic-executor" }
+security-fuzzer = { path = "../../fuzzing/security-fuzzer" }
+z3 = "0.12"

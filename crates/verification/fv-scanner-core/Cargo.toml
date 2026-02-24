@@ -1,0 +1,18 @@
+[package]
+name = "fv-scanner-core"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+chrono = { workspace = true }
+log = { workspace = true }
+
+# Layers
+fv-layer1-verifier = { path = "../../verification/fv-layer1-verifier" }
+fv-layer2-verifier = { path = "../../verification/fv-layer2-verifier" }
+fv-layer3-verifier = { path = "../../verification/fv-layer3-verifier" }
+fv-layer4-verifier = { path = "../../verification/fv-layer4-verifier" }
