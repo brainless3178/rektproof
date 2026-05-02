@@ -9,8 +9,8 @@ output-dir = "target/tarpaulin"
 # Packages to measure coverage on
 packages = [
     "program-analyzer",
-    "shanon-api",
-    "shanon-guard",
+    "proktor-api",
+    "proktor-guard",
     "git-scanner",
     "firedancer-monitor",
     "token-scanner",

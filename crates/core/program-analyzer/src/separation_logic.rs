@@ -80,6 +80,28 @@ pub struct AccountCell {
     consumed: bool,
 }
 
+impl AccountCell {
+    /// Create a new account cell (initially unconsumed).
+    pub fn new(
+        key: SolanaKey,
+        owner: SolanaKey,
+        is_signer: bool,
+        is_writable: bool,
+        lamports: SymbolicValue,
+        data_type: Option<String>,
+    ) -> Self {
+        Self {
+            key,
+            owner,
+            is_signer,
+            is_writable,
+            lamports,
+            data_type,
+            consumed: false,
+        }
+    }
+}
+
 /// A symbolic integer value.
 #[derive(Debug, Clone)]
 pub enum SymbolicValue {

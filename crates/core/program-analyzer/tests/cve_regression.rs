@@ -1,6 +1,6 @@
 //! CVE Regression Tests
 //!
-//! Tests that verify rektproof catches patterns from real-world Solana exploits.
+//! Tests that verify proktor catches patterns from real-world Solana exploits.
 //! Each test case is modeled after the actual vulnerable code from production incidents.
 
 #[cfg(test)]

@@ -159,6 +159,8 @@ pub struct ConcolicExecutor {
     findings: Vec<ConcolicFinding>,
     /// Coverage
     coverage: CoverageInfo,
+    /// Loaded source code for semantic analysis
+    source_code: Option<String>,
 }
 
 impl ConcolicExecutor {
@@ -170,7 +172,17 @@ impl ConcolicExecutor {
             test_inputs: Vec::new(),
             findings: Vec::new(),
             coverage: CoverageInfo::default(),
+            source_code: None,
         }
+    }
+
+    /// Load program source code for semantic path extraction.
+    ///
+    /// When source is loaded, `execute_path` will parse it to discover
+    /// branch conditions (if-guards, require-like checks, match arms)
+    /// and feed them into the Z3 constraint solver.
+    pub fn load_source(&mut self, source: &str) {
+        self.source_code = Some(source.to_string());
     }
 
     /// Execute concolic analysis starting with initial concrete inputs

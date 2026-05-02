@@ -5,7 +5,7 @@ resolution = true
 skip-lint = true
 
 [programs.devnet]
-shanon_oracle = "Ea1qKkVjEEGa5mLAWdDryPB1nsGHyuxwB7oQFz8obbw4"
+proktor_oracle = "Ea1qKkVjEEGa5mLAWdDryPB1nsGHyuxwB7oQFz8obbw4"
 
 [registry]
 url = "https://api.apr.dev"

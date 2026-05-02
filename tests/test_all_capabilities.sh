@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 ###############################################################################
-# Shannon — Comprehensive Capability Test Suite
+# Proktor — Comprehensive Capability Test Suite
 # Target: Jupiter Aggregator v6 + Local Vulnerable Programs
 # Tests ALL 10 scanning capabilities
 ###############################################################################
@@ -9,15 +9,15 @@ set -euo pipefail
 
 # ─── Configuration ──────────────────────────────────────────────────────────
 PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SHANON_BIN="$PROJECT_ROOT/target/debug/shanon"
-SHANON_API_BIN="$PROJECT_ROOT/target/debug/shanon-api"
+PROKTOR_BIN="$PROJECT_ROOT/target/debug/proktor"
+PROKTOR_API_BIN="$PROJECT_ROOT/target/debug/proktor-api"
 JUPITER_PROGRAM_ID="JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4"
 JUPITER_TOKEN_MINT="JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN"
 API_PORT=18080
 RESULTS_DIR="$PROJECT_ROOT/test_results"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 REPORT_FILE="$RESULTS_DIR/test_report_${TIMESTAMP}.md"
-JUPITER_CLONE_DIR="/tmp/shanon-test-jupiter-core"
+JUPITER_CLONE_DIR="/tmp/proktor-test-jupiter-core"
 CURL_TIMEOUT=15  # seconds
 
 # Colors
@@ -89,7 +89,7 @@ trap cleanup EXIT
 mkdir -p "$RESULTS_DIR"
 
 cat > "$REPORT_FILE" << HEADER
-# Shannon Security Platform — Full Capability Test Report
+# Proktor Security Platform — Full Capability Test Report
 
 **Generated:** $(date -R)
 **Target:** Jupiter Aggregator v6 (\`JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4\`)
@@ -100,13 +100,13 @@ cat > "$REPORT_FILE" << HEADER
 
 HEADER
 
-log_header "BUILDING SHANNON BINARIES"
+log_header "BUILDING PROKTOR BINARIES"
 
-echo "Building shanon-cli and shanon-api..."
+echo "Building proktor-cli and proktor-api..."
 cd "$PROJECT_ROOT"
-cargo build -p shanon-cli -p shanon-api 2>&1 | tail -5
+cargo build -p proktor-cli -p proktor-api 2>&1 | tail -5
 
-if [ ! -f "$SHANON_BIN" ] || [ ! -f "$SHANON_API_BIN" ]; then
+if [ ! -f "$PROKTOR_BIN" ] || [ ! -f "$PROKTOR_API_BIN" ]; then
     echo -e "${RED}ERROR: Binaries not found${NC}"
     exit 1
 fi
@@ -120,7 +120,7 @@ log_header "TEST 1: LOCAL SOURCE SCAN"
 echo "### Test 1: Local Source Scan" >> "$REPORT_FILE"
 
 log_test "Scan vulnerable-vault (local source)"
-OUTPUT=$("$SHANON_BIN" scan "$PROJECT_ROOT/programs/vulnerable-vault" --format json 2>/dev/null || true)
+OUTPUT=$("$PROKTOR_BIN" scan "$PROJECT_ROOT/programs/vulnerable-vault" --format json 2>/dev/null || true)
 if echo "$OUTPUT" | python3 -c "import sys,json; d=json.load(sys.stdin); assert len(d) > 0" 2>/dev/null; then
     CNT=$(echo "$OUTPUT" | python3 -c "import sys,json; print(len(json.load(sys.stdin)))" 2>/dev/null)
     log_pass "Found $CNT findings in vulnerable-vault"
@@ -130,7 +130,7 @@ else
 fi
 
 log_test "Scan vulnerable-token (local source)"
-OUTPUT=$("$SHANON_BIN" scan "$PROJECT_ROOT/programs/vulnerable-token" --format json 2>/dev/null || true)
+OUTPUT=$("$PROKTOR_BIN" scan "$PROJECT_ROOT/programs/vulnerable-token" --format json 2>/dev/null || true)
 if echo "$OUTPUT" | python3 -c "import sys,json; d=json.load(sys.stdin); assert len(d) >= 0" 2>/dev/null; then
     CNT=$(echo "$OUTPUT" | python3 -c "import sys,json; print(len(json.load(sys.stdin)))" 2>/dev/null)
     log_pass "Found $CNT findings in vulnerable-token"
@@ -139,7 +139,7 @@ else
 fi
 
 log_test "Scan vulnerable-staking (local source)"
-OUTPUT=$("$SHANON_BIN" scan "$PROJECT_ROOT/programs/vulnerable-staking" --format json 2>/dev/null || true)
+OUTPUT=$("$PROKTOR_BIN" scan "$PROJECT_ROOT/programs/vulnerable-staking" --format json 2>/dev/null || true)
 if echo "$OUTPUT" | python3 -c "import sys,json; d=json.load(sys.stdin); assert len(d) >= 0" 2>/dev/null; then
     CNT=$(echo "$OUTPUT" | python3 -c "import sys,json; print(len(json.load(sys.stdin)))" 2>/dev/null)
     log_pass "Found $CNT findings in vulnerable-staking"
@@ -147,17 +147,17 @@ else
     log_fail "vulnerable-staking scan failed"
 fi
 
-log_test "Scan shanon-oracle (should be cleaner)"
-OUTPUT=$("$SHANON_BIN" scan "$PROJECT_ROOT/programs/shanon-oracle" --format json 2>/dev/null || true)
+log_test "Scan proktor-oracle (should be cleaner)"
+OUTPUT=$("$PROKTOR_BIN" scan "$PROJECT_ROOT/programs/proktor-oracle" --format json 2>/dev/null || true)
 if echo "$OUTPUT" | python3 -c "import sys,json; json.load(sys.stdin)" 2>/dev/null; then
     CNT=$(echo "$OUTPUT" | python3 -c "import sys,json; print(len(json.load(sys.stdin)))" 2>/dev/null)
-    log_pass "Found $CNT findings in shanon-oracle"
+    log_pass "Found $CNT findings in proktor-oracle"
 else
-    log_fail "shanon-oracle scan failed"
+    log_fail "proktor-oracle scan failed"
 fi
 
 log_test "Human-readable output"
-HR=$("$SHANON_BIN" scan "$PROJECT_ROOT/programs/vulnerable-vault" 2>&1 || true)
+HR=$("$PROKTOR_BIN" scan "$PROJECT_ROOT/programs/vulnerable-vault" 2>&1 || true)
 if echo "$HR" | grep -qi "finding\|detected\|vulnerability\|critical\|high\|medium\|low"; then
     log_pass "Human-readable output has severity info"
 else
@@ -197,7 +197,7 @@ if [ "$CLONE_OK" = true ] && [ -n "${JUPITER_CLONE_DIR:-}" ] && [ -d "$JUPITER_C
     fi
     SCAN_OK=false
     for DIR in $SCAN_DIRS; do
-        OUTPUT=$("$SHANON_BIN" scan "$DIR" --format json 2>/dev/null || true)
+        OUTPUT=$("$PROKTOR_BIN" scan "$DIR" --format json 2>/dev/null || true)
         if echo "$OUTPUT" | python3 -c "import sys,json; d=json.load(sys.stdin); assert isinstance(d, list)" 2>/dev/null; then
             CNT=$(echo "$OUTPUT" | python3 -c "import sys,json; print(len(json.load(sys.stdin)))" 2>/dev/null)
             log_pass "Scanned $(basename $DIR): $CNT findings"
@@ -208,7 +208,7 @@ if [ "$CLONE_OK" = true ] && [ -n "${JUPITER_CLONE_DIR:-}" ] && [ -d "$JUPITER_C
     done
     if [ "$SCAN_OK" = false ]; then
         # Try scanning the root — analyzer will still try to find .rs files
-        OUTPUT=$("$SHANON_BIN" scan "$JUPITER_CLONE_DIR" --format json 2>/dev/null || true)
+        OUTPUT=$("$PROKTOR_BIN" scan "$JUPITER_CLONE_DIR" --format json 2>/dev/null || true)
         if echo "$OUTPUT" | python3 -c "import sys,json; d=json.load(sys.stdin); assert isinstance(d, list)" 2>/dev/null; then
             CNT=$(echo "$OUTPUT" | python3 -c "import sys,json; print(len(json.load(sys.stdin)))" 2>/dev/null)
             log_pass "Root scan: $CNT findings"
@@ -245,7 +245,7 @@ log_header "TEST 4: TOKEN RISK SCAN"
 echo "### Test 4: Token Risk Scan" >> "$REPORT_FILE"
 
 log_test "Scan JUP token"
-OUTPUT=$("$SHANON_BIN" token-scan "$JUPITER_TOKEN_MINT" --format json 2>/dev/null || true)
+OUTPUT=$("$PROKTOR_BIN" token-scan "$JUPITER_TOKEN_MINT" --format json 2>/dev/null || true)
 if echo "$OUTPUT" | python3 -c "import sys,json; d=json.load(sys.stdin); assert 'risk_score' in d" 2>/dev/null; then
     RS=$(echo "$OUTPUT" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['risk_score'])" 2>/dev/null)
     GR=$(echo "$OUTPUT" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['grade'])" 2>/dev/null)
@@ -257,7 +257,7 @@ fi
 
 log_test "Token scan with source"
 if [ -n "${JUPITER_CLONE_DIR:-}" ] && [ -d "${JUPITER_CLONE_DIR:-/x}" ]; then
-    OUTPUT=$("$SHANON_BIN" token-scan "$JUPITER_TOKEN_MINT" --source "$JUPITER_CLONE_DIR" --format json 2>/dev/null || true)
+    OUTPUT=$("$PROKTOR_BIN" token-scan "$JUPITER_TOKEN_MINT" --source "$JUPITER_CLONE_DIR" --format json 2>/dev/null || true)
     if echo "$OUTPUT" | python3 -c "import sys,json; d=json.load(sys.stdin); assert 'risk_score' in d" 2>/dev/null; then
         log_pass "Token scan with source completed"
     else
@@ -274,7 +274,7 @@ log_header "TEST 5: FIREDANCER COMPATIBILITY CHECK"
 echo "### Test 5: Firedancer Compatibility" >> "$REPORT_FILE"
 
 log_test "Firedancer check on vulnerable-vault"
-OUTPUT=$("$SHANON_BIN" firedancer-check --source "$PROJECT_ROOT/programs/vulnerable-vault" --format json 2>/dev/null || true)
+OUTPUT=$("$PROKTOR_BIN" firedancer-check --source "$PROJECT_ROOT/programs/vulnerable-vault" --format json 2>/dev/null || true)
 if echo "$OUTPUT" | python3 -c "import sys,json; d=json.load(sys.stdin); assert 'score' in d or 'grade' in d" 2>/dev/null; then
     SC=$(echo "$OUTPUT" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('score','?'))" 2>/dev/null)
     GR=$(echo "$OUTPUT" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('grade','?'))" 2>/dev/null)
@@ -286,7 +286,7 @@ fi
 
 log_test "Firedancer check on cloned repo"
 if [ -n "${JUPITER_CLONE_DIR:-}" ] && [ -d "${JUPITER_CLONE_DIR:-/x}" ]; then
-    OUTPUT=$("$SHANON_BIN" firedancer-check --source "$JUPITER_CLONE_DIR" --format json 2>/dev/null || true)
+    OUTPUT=$("$PROKTOR_BIN" firedancer-check --source "$JUPITER_CLONE_DIR" --format json 2>/dev/null || true)
     if echo "$OUTPUT" | python3 -c "import sys,json; json.load(sys.stdin)" 2>/dev/null; then
         log_pass "Firedancer on cloned repo completed"
     else
@@ -297,7 +297,7 @@ else
 fi
 
 log_test "Firedancer human-readable output"
-HR=$("$SHANON_BIN" firedancer-check --source "$PROJECT_ROOT/programs/vulnerable-vault" 2>&1 || true)
+HR=$("$PROKTOR_BIN" firedancer-check --source "$PROJECT_ROOT/programs/vulnerable-vault" 2>&1 || true)
 if echo "$HR" | grep -qi "firedancer\|compat\|grade\|score\|warning"; then
     log_pass "Human-readable output OK"
 else
@@ -311,7 +311,7 @@ log_header "TEST 6: CPI DEPENDENCY GRAPH"
 echo "### Test 6: CPI Dependency Graph" >> "$REPORT_FILE"
 
 log_test "CPI graph with source (JSON)"
-OUTPUT=$("$SHANON_BIN" cpi-graph "$JUPITER_PROGRAM_ID" --source "$PROJECT_ROOT/programs/vulnerable-vault" --format json 2>/dev/null || true)
+OUTPUT=$("$PROKTOR_BIN" cpi-graph "$JUPITER_PROGRAM_ID" --source "$PROJECT_ROOT/programs/vulnerable-vault" --format json 2>/dev/null || true)
 if echo "$OUTPUT" | python3 -c "import sys,json; d=json.load(sys.stdin); assert 'nodes' in d or 'edges' in d" 2>/dev/null; then
     NC=$(echo "$OUTPUT" | python3 -c "import sys,json; print(len(json.load(sys.stdin).get('nodes',{})))" 2>/dev/null)
     log_pass "CPI graph: $NC nodes"
@@ -321,7 +321,7 @@ else
 fi
 
 log_test "CPI graph D3 format"
-OUTPUT=$("$SHANON_BIN" cpi-graph "$JUPITER_PROGRAM_ID" --source "$PROJECT_ROOT/programs/vulnerable-vault" --format d3 2>/dev/null || true)
+OUTPUT=$("$PROKTOR_BIN" cpi-graph "$JUPITER_PROGRAM_ID" --source "$PROJECT_ROOT/programs/vulnerable-vault" --format d3 2>/dev/null || true)
 if echo "$OUTPUT" | python3 -c "import sys,json; d=json.load(sys.stdin); assert 'nodes' in d or 'links' in d" 2>/dev/null; then
     log_pass "D3 JSON OK"
 else
@@ -329,7 +329,7 @@ else
 fi
 
 log_test "CPI graph human-readable"
-HR=$("$SHANON_BIN" cpi-graph "$JUPITER_PROGRAM_ID" --source "$PROJECT_ROOT/programs/vulnerable-vault" 2>&1 || true)
+HR=$("$PROKTOR_BIN" cpi-graph "$JUPITER_PROGRAM_ID" --source "$PROJECT_ROOT/programs/vulnerable-vault" 2>&1 || true)
 if echo "$HR" | grep -qi "CPI\|dependency\|program\|risk"; then
     log_pass "Human-readable OK"
 else
@@ -343,7 +343,7 @@ log_header "TEST 7: SECURITY SCORE"
 echo "### Test 7: Security Score" >> "$REPORT_FILE"
 
 log_test "Score vulnerable-vault"
-OUTPUT=$("$SHANON_BIN" score "$PROJECT_ROOT/programs/vulnerable-vault" --name "Vulnerable Vault" --format json 2>/dev/null || true)
+OUTPUT=$("$PROKTOR_BIN" score "$PROJECT_ROOT/programs/vulnerable-vault" --name "Vulnerable Vault" --format json 2>/dev/null || true)
 if echo "$OUTPUT" | python3 -c "import sys,json; d=json.load(sys.stdin); assert 'score' in d and 'grade' in d" 2>/dev/null; then
     SC=$(echo "$OUTPUT" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['score'])" 2>/dev/null)
     GR=$(echo "$OUTPUT" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['grade'])" 2>/dev/null)
@@ -353,8 +353,8 @@ else
     log_fail "Score failed"
 fi
 
-log_test "Score shanon-oracle"
-OUTPUT=$("$SHANON_BIN" score "$PROJECT_ROOT/programs/shanon-oracle" --name "Shanon Oracle" --format json 2>/dev/null || true)
+log_test "Score proktor-oracle"
+OUTPUT=$("$PROKTOR_BIN" score "$PROJECT_ROOT/programs/proktor-oracle" --name "Proktor Oracle" --format json 2>/dev/null || true)
 if echo "$OUTPUT" | python3 -c "import sys,json; d=json.load(sys.stdin); assert 'score' in d" 2>/dev/null; then
     SC=$(echo "$OUTPUT" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['score'])" 2>/dev/null)
     GR=$(echo "$OUTPUT" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['grade'])" 2>/dev/null)
@@ -364,7 +364,7 @@ else
 fi
 
 log_test "Score human-readable"
-HR=$("$SHANON_BIN" score "$PROJECT_ROOT/programs/vulnerable-vault" --name "Test" 2>&1 || true)
+HR=$("$PROKTOR_BIN" score "$PROJECT_ROOT/programs/vulnerable-vault" --name "Test" 2>&1 || true)
 if echo "$HR" | grep -qi "score\|grade\|security"; then
     log_pass "Human-readable OK"
 else
@@ -378,7 +378,7 @@ log_header "TEST 8: UPGRADE AUTHORITY MONITORING"
 echo "### Test 8: Upgrade Authority Monitoring" >> "$REPORT_FILE"
 
 log_test "Watch initializes correctly (5s timeout)"
-timeout 8 "$SHANON_BIN" watch "$JUPITER_PROGRAM_ID" --interval 5 2>&1 | head -20 > "$RESULTS_DIR/test8_watch.txt" || true
+timeout 8 "$PROKTOR_BIN" watch "$JUPITER_PROGRAM_ID" --interval 5 2>&1 | head -20 > "$RESULTS_DIR/test8_watch.txt" || true
 if grep -qi "setting up\|authority\|watcher\|polling\|monitoring\|ctrl" "$RESULTS_DIR/test8_watch.txt"; then
     log_pass "Watch command initializes"
 else
@@ -392,7 +392,7 @@ log_header "TEST 9: FULL VERIFICATION SUITE"
 echo "### Test 9: Full Verification Suite" >> "$REPORT_FILE"
 
 log_test "Verify + SOC2 compliance"
-OUTPUT=$("$SHANON_BIN" verify "$JUPITER_PROGRAM_ID" --source "$PROJECT_ROOT/programs/vulnerable-vault" --compliance soc2 --format json 2>/dev/null || true)
+OUTPUT=$("$PROKTOR_BIN" verify "$JUPITER_PROGRAM_ID" --source "$PROJECT_ROOT/programs/vulnerable-vault" --compliance soc2 --format json 2>/dev/null || true)
 if echo "$OUTPUT" | python3 -c "import sys,json; d=json.load(sys.stdin); assert 'tier' in d or 'security_summary' in d" 2>/dev/null; then
     TIER=$(echo "$OUTPUT" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('tier_label', d.get('tier','?')))" 2>/dev/null)
     log_pass "Verified — Tier: $TIER"
@@ -402,7 +402,7 @@ else
 fi
 
 log_test "Verify + ISO27001"
-OUTPUT=$("$SHANON_BIN" verify "$JUPITER_PROGRAM_ID" --source "$PROJECT_ROOT/programs/shanon-oracle" --compliance iso27001 --format json 2>/dev/null || true)
+OUTPUT=$("$PROKTOR_BIN" verify "$JUPITER_PROGRAM_ID" --source "$PROJECT_ROOT/programs/proktor-oracle" --compliance iso27001 --format json 2>/dev/null || true)
 if echo "$OUTPUT" | python3 -c "import sys,json; json.load(sys.stdin)" 2>/dev/null; then
     log_pass "ISO27001 OK"
 else
@@ -410,7 +410,7 @@ else
 fi
 
 log_test "Verify + OWASP"
-OUTPUT=$("$SHANON_BIN" verify "$JUPITER_PROGRAM_ID" --source "$PROJECT_ROOT/programs/shanon-oracle" --compliance owasp --format json 2>/dev/null || true)
+OUTPUT=$("$PROKTOR_BIN" verify "$JUPITER_PROGRAM_ID" --source "$PROJECT_ROOT/programs/proktor-oracle" --compliance owasp --format json 2>/dev/null || true)
 if echo "$OUTPUT" | python3 -c "import sys,json; json.load(sys.stdin)" 2>/dev/null; then
     log_pass "OWASP OK"
 else
@@ -418,7 +418,7 @@ else
 fi
 
 log_test "Verify + Solana Foundation"
-OUTPUT=$("$SHANON_BIN" verify "$JUPITER_PROGRAM_ID" --source "$PROJECT_ROOT/programs/shanon-oracle" --compliance solana --format json 2>/dev/null || true)
+OUTPUT=$("$PROKTOR_BIN" verify "$JUPITER_PROGRAM_ID" --source "$PROJECT_ROOT/programs/proktor-oracle" --compliance solana --format json 2>/dev/null || true)
 if echo "$OUTPUT" | python3 -c "import sys,json; json.load(sys.stdin)" 2>/dev/null; then
     log_pass "Solana Foundation OK"
 else
@@ -426,7 +426,7 @@ else
 fi
 
 log_test "Verify human-readable"
-HR=$("$SHANON_BIN" verify "$JUPITER_PROGRAM_ID" --source "$PROJECT_ROOT/programs/vulnerable-vault" --compliance soc2 2>&1 || true)
+HR=$("$PROKTOR_BIN" verify "$JUPITER_PROGRAM_ID" --source "$PROJECT_ROOT/programs/vulnerable-vault" --compliance soc2 2>&1 || true)
 if echo "$HR" | grep -qi "verification\|tier\|authority\|compliance\|source"; then
     log_pass "Human-readable OK"
 else
@@ -440,8 +440,8 @@ log_header "TEST 10: REST API TESTS"
 echo "### Test 10: REST API" >> "$REPORT_FILE"
 
 log_test "Start API server"
-SHANON_PORT=$API_PORT SOLANA_RPC_URL="https://api.mainnet-beta.solana.com" \
-    "$SHANON_API_BIN" &>/dev/null &
+proktor_PORT=$API_PORT SOLANA_RPC_URL="https://api.mainnet-beta.solana.com" \
+    "$PROKTOR_API_BIN" &>/dev/null &
 API_PID=$!
 
 API_READY=false
@@ -620,7 +620,7 @@ log_header "BONUS: GUARD CLI (Dependency Firewall)"
 echo "### Bonus: Guard CLI" >> "$REPORT_FILE"
 
 log_test "Guard scan on project root"
-OUTPUT=$("$SHANON_BIN" guard --path "$PROJECT_ROOT" --format json 2>/dev/null || true)
+OUTPUT=$("$PROKTOR_BIN" guard --path "$PROJECT_ROOT" --format json 2>/dev/null || true)
 if echo "$OUTPUT" | python3 -c "import sys,json; json.load(sys.stdin)" 2>/dev/null; then
     log_pass "Guard CLI OK"
     echo "$OUTPUT" > "$RESULTS_DIR/bonus_guard.json"
@@ -641,7 +641,7 @@ else
 fi
 
 echo -e "${BOLD}╔═══════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${BOLD}║  🛡️  SHANNON CAPABILITY TEST RESULTS                         ║${NC}"
+echo -e "${BOLD}║  🛡️  PROKTOR CAPABILITY TEST RESULTS                         ║${NC}"
 echo -e "${BOLD}╠═══════════════════════════════════════════════════════════════╣${NC}"
 printf "${BOLD}║${NC}  ${GREEN}✅ Passed:  %-5s${NC}                                        ${BOLD}║${NC}\n" "$PASS"
 printf "${BOLD}║${NC}  ${RED}❌ Failed:  %-5s${NC}                                        ${BOLD}║${NC}\n" "$FAIL"

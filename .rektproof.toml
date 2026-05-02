@@ -1,5 +1,5 @@
-# rektproof Configuration
-# Place this file in your project root as `.rektproof.toml`
+# proktor Configuration
+# Place this file in your project root as `.proktor.toml`
 
 [scan]
 min_severity = "low"          # "low", "medium", "high", "critical"

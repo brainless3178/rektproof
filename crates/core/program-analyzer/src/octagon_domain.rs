@@ -39,15 +39,17 @@
 
 use std::collections::HashMap;
 use std::fmt;
+use syn::Stmt;
+use crate::abstract_domain::AbstractDomain;
 
 /// Represents +∞ in the DBM. Any value ≥ this is treated as unbounded.
-const INF: i128 = i128::MAX / 2;
+// Already defined below as pub const INF
 
 /// An octagon abstract state over `n` variables.
 ///
 /// Internally stored as a 2n × 2n Difference Bound Matrix where
 /// entry `m[a][b]` encodes `v_a - v_b ≤ m[a][b]`.
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub struct OctagonState {
     /// Number of program variables
     n: usize,
@@ -59,6 +61,8 @@ pub struct OctagonState {
     /// Whether the DBM is in closed (canonical) form
     closed: bool,
 }
+
+pub const INF: i128 = i128::MAX / 2;
 
 impl fmt::Debug for OctagonState {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -359,6 +363,13 @@ impl OctagonState {
         if hi_b < INF {
             self.add_difference_constraint(target, a, hi_b);
         }
+        // Preserve difference relation: target - b ∈ [lo_a, hi_a]
+        if lo_a > -INF {
+            self.add_difference_constraint(b, target, -lo_a);
+        }
+        if hi_a < INF {
+            self.add_difference_constraint(target, b, hi_a);
+        }
     }
 
     /// Assignment: x_i := x_j - x_k
@@ -387,6 +398,23 @@ impl OctagonState {
         }
     }
 
+    /// Assignment: x_i := x_j (copy bounds)
+    pub fn assign_var(&mut self, target: &str, source: &str) {
+        self.close();
+        let lo = self.lower_bound(source).unwrap_or(-INF);
+        let hi = self.upper_bound(source).unwrap_or(INF);
+
+        self.forget_var(target);
+        if lo > -INF {
+            self.add_lower_bound(target, lo);
+        }
+        if hi < INF {
+            self.add_upper_bound(target, hi);
+        }
+        // Step 6: Add equality constraint: target - source ≤ 0 ∧ source - target ≤ 0
+        self.add_equality(target, source);
+    }
+
     /// Forget all constraints involving variable x_i (projection).
     pub fn forget_var(&mut self, name: &str) {
         if let Some(&idx) = self.var_index.get(name) {
@@ -406,6 +434,22 @@ impl OctagonState {
             self.set_raw(pos, pos, 0);
             self.set_raw(neg, neg, 0);
             self.closed = false;
+        }
+    }
+
+    /// Register a new variable into the octagon domain.
+    /// This ensures consistent dimension mapping across different OctagonState instances.
+    pub fn register_variable(&mut self, name: &str) {
+        if !self.var_index.contains_key(name) {
+            let mut names: Vec<String> = self.var_index.keys().cloned().collect();
+            // Sort to ensure deterministic index assignment
+            names.push(name.to_string());
+            names.sort(); 
+            
+            let var_refs: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
+            let mut new_state = OctagonState::new(&var_refs);
+            new_state.join(self); // Copy existing constraints
+            *self = new_state;
         }
     }
 
@@ -442,9 +486,9 @@ impl OctagonState {
 
     /// Widening (∇): stabilize ascending chains.
     ///
-    /// For each entry: if the new bound grew, push to +∞.
+    /// For each entry: if the new bound grew, push to the next threshold or +∞.
     /// Guarantees termination of fixed-point iteration.
-    pub fn widen(&self, other: &OctagonState) -> OctagonState {
+    pub fn widen(&self, other: &OctagonState, context: &crate::abstract_domain::AnalysisContext) -> OctagonState {
         assert_eq!(self.n, other.n);
         let mut a = self.clone();
         let mut b = other.clone();
@@ -453,9 +497,38 @@ impl OctagonState {
 
         let dim = a.dim();
         let mut result = a.clone();
-        for i in 0..dim * dim {
-            if b.dbm[i] > a.dbm[i] {
-                result.dbm[i] = INF; // Grew → push to ∞
+        for i in 0..dim {
+            for j in 0..dim {
+                let idx = i * dim + j;
+                let old = a.dbm[idx];
+                let new = b.dbm[idx];
+
+                if new > old {
+                    // STEP 10A.4 — Correct Widen Rule
+                    // Identify if this is a unary upper or lower bound to apply guided widening
+                    if i == (j ^ 1) {
+                        // This is a diagonal-like entry: 2*x_i or -2*x_i
+                        if i % 2 == 0 {
+                            // v_{2k} - v_{2k+1} = 2*x_k  (Upper bound)
+                            let thresholds: Vec<i128> = context.thresholds.iter().map(|&t| t.saturating_mul(2)).collect();
+                            result.dbm[idx] = widen_bound(old, new, &thresholds);
+                        } else {
+                            // v_{2k+1} - v_{2k} = -2*x_k (Lower bound)
+                            // x_k >= c  =>  -2*x_k <= -2c. 
+                            // As x_k decreases, -2*x_k increases.
+                            let thresholds: Vec<i128> = context.thresholds.iter().map(|&t| (-t).saturating_mul(2)).collect();
+                            // Sort thresholds for lower bounds (they are negative)
+                            let mut sorted_ts = thresholds;
+                            sorted_ts.sort();
+                            result.dbm[idx] = widen_bound(old, new, &sorted_ts);
+                        }
+                    } else {
+                        // Relational bound: x_i - x_j <= c or x_i + x_j <= c
+                        // For now, push to INF to ensure termination, as we don't have
+                        // a good set of relational thresholds.
+                        result.dbm[idx] = INF;
+                    }
+                }
             }
         }
         result.closed = false;
@@ -492,6 +565,19 @@ impl OctagonState {
             }
         }
         true
+    }
+
+    /// Perform a narrowing pass to recover precision after widening.
+    pub fn narrowing_pass(&mut self, other: &OctagonState) {
+        let mut prev = self.clone();
+        for _ in 0..5 { // Limit iterations
+            *self = self.narrow(other);
+            self.close();
+            if self.is_included_in(&prev) && prev.is_included_in(self) {
+                break;
+            }
+            prev = self.clone();
+        }
     }
 
     // ── Query Operations ───────────────────────────────────────────────
@@ -585,6 +671,140 @@ impl OctagonState {
     }
 }
 
+// ── Widening Helpers ──────────────────────────────────────────────────
+
+fn next_threshold_above(old: i128, thresholds: &[i128]) -> Option<i128> {
+    thresholds.iter().cloned().find(|&t| t > old)
+}
+
+fn widen_bound(old: i128, new: i128, thresholds: &[i128]) -> i128 {
+    if new <= old {
+        return old;
+    }
+
+    if let Some(t) = next_threshold_above(old, thresholds) {
+        println!("[Widening] Bound grew from {} to {}, jumping to threshold {}", old, new, t);
+        t
+    } else {
+        println!("[Widening] Bound grew from {} to {}, no threshold found, jumping to INF", old, new);
+        INF
+    }
+}
+
+// ── Abstract Domain Implementation ────────────────────────────────────
+
+impl AbstractDomain for OctagonState {
+    fn join(&self, other: &Self) -> Self {
+        self.join(other)
+    }
+
+    fn widen(&self, other: &Self, context: &crate::abstract_domain::AnalysisContext) -> Self {
+        self.widen(other, context)
+    }
+
+    fn transfer(&self, stmt: &syn::Stmt) -> Self {
+        let mut new_state = self.clone();
+
+        // STEP 5.2 — Handle constant assignments (x = 5)
+        if let syn::Stmt::Local(local) = stmt {
+            if let Some((ident, expr)) = extract_assignment(local) {
+                if let Some(const_val) = extract_constant(expr) {
+                    new_state.register_variable(&ident);
+                    new_state.assign_constant(&ident, const_val as i128);
+                } else if let Some(src_var) = extract_var_name(expr) {
+                    // STEP 6.1 — Handle variable copies (y = x)
+                    new_state.register_variable(&ident);
+                    new_state.register_variable(&src_var);
+                    new_state.assign_var(&ident, &src_var);
+                } else if let Some((src_var, offset)) = extract_linear_arithmetic(expr) {
+                    // STEP 7 — Handle relational arithmetic (x = y + c)
+                    new_state.register_variable(&ident);
+                    new_state.register_variable(&src_var);
+                    new_state.assign_linear(&ident, &src_var, offset);
+                }
+            }
+        } else if let syn::Stmt::Expr(expr, _) | syn::Stmt::Semi(expr, _) = stmt {
+            // STEP 8 — Handle conditionals and guards (if x < 10)
+            // Simplified: if we see a comparison statement, treat it as a guard
+            if let Some((lhs, op, rhs)) = extract_comparison(expr) {
+                if let (Some(l_var), Some(r_const)) = (extract_var_name(lhs), extract_constant(rhs)) {
+                    new_state.register_variable(&l_var);
+                    match op {
+                        syn::BinOp::Lt(_) | syn::BinOp::Le(_) => {
+                            new_state.add_upper_bound(&l_var, r_const);
+                        }
+                        syn::BinOp::Gt(_) | syn::BinOp::Ge(_) => {
+                            new_state.add_lower_bound(&l_var, r_const);
+                        }
+                        syn::BinOp::Eq(_) => {
+                            new_state.assign_constant(&l_var, r_const);
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+
+        new_state
+    }
+}
+
+/// Helper to extract (lhs, op, rhs) from `x < 10`
+pub fn extract_comparison(expr: &syn::Expr) -> Option<(&syn::Expr, syn::BinOp, &syn::Expr)> {
+    if let syn::Expr::Binary(syn::ExprBinary { left, op, right, .. }) = expr {
+        match op {
+            syn::BinOp::Lt(_) | syn::BinOp::Le(_) | syn::BinOp::Gt(_) | syn::BinOp::Ge(_) | syn::BinOp::Eq(_) => {
+                Some((&*left, *op, &*right))
+            }
+            _ => None,
+        }
+    } else {
+        None
+    }
+}
+
+/// Helper to extract (name, expression) from `let name = expr;`
+pub fn extract_assignment(local: &syn::Local) -> Option<(String, &syn::Expr)> {
+    use syn::Pat;
+    if let Pat::Ident(pat_ident) = &local.pat {
+        if let Some(init) = &local.init {
+            return Some((pat_ident.ident.to_string(), &*init.expr));
+        }
+    }
+    None
+}
+
+/// Helper to extract variable name from an expression (simple paths)
+fn extract_var_name(expr: &syn::Expr) -> Option<String> {
+    if let syn::Expr::Path(expr_path) = expr {
+        return expr_path.path.segments.last().map(|s| s.ident.to_string());
+    }
+    None
+}
+
+/// Helper to extract linear arithmetic (src_var, offset) from `y + c` or `y - c`
+fn extract_linear_arithmetic(expr: &syn::Expr) -> Option<(String, i128)> {
+    if let syn::Expr::Binary(syn::ExprBinary { left, op, right, .. }) = expr {
+        let var_name = extract_var_name(left)?;
+        let offset = extract_constant(right)?;
+        match op {
+            syn::BinOp::Add(_) => Some((var_name, offset)),
+            syn::BinOp::Sub(_) => Some((var_name, -offset)),
+            _ => None,
+        }
+    } else {
+        None
+    }
+}
+
+/// Helper to extract i128 from simple literal expressions
+pub fn extract_constant(expr: &syn::Expr) -> Option<i128> {
+    if let syn::Expr::Lit(syn::ExprLit { lit: syn::Lit::Int(lit_int), .. }) = expr {
+        return lit_int.base10_parse::<i128>().ok();
+    }
+    None
+}
+
 // ── Solana DeFi Analysis ────────────────────────────────────────────────
 
 /// Result of octagon-based DeFi property verification.
@@ -673,15 +893,7 @@ pub fn verify_defi_conservation(
     }
 
     // Narrowing pass for precision recovery
-    for op in operations {
-        match op {
-            DeFiTransfer::Transfer { from, to, .. } => {
-                let _ = (from, to); // narrowing uses current constraints
-            }
-        }
-        state = prev.narrow(&state);
-        prev = state.clone();
-    }
+    state.narrowing_pass(&prev);
 
     state.close();
 

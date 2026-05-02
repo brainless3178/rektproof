@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Precision/Recall Benchmark Suite for Shannon Security Scanner.
+Precision/Recall Benchmark Suite for Proktor Security Scanner.
 
 Scans 25+ Solana programs, classifies findings, and computes
 precision/recall per detector and overall.
@@ -25,7 +25,7 @@ from pathlib import Path
 from dataclasses import dataclass, field, asdict
 from typing import Optional
 
-SCANNER = "./target/debug/shanon"
+SCANNER = "./target/debug/proktor"
 RESULTS_DIR = "./precision_recall_results"
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -380,7 +380,7 @@ def compute_metrics(all_results: list) -> dict:
 def print_report(all_results: list, metrics: dict):
     """Print human-readable report."""
     print("=" * 80)
-    print("SHANNON SECURITY SCANNER — PRECISION/RECALL BENCHMARK")
+    print("PROKTOR SECURITY SCANNER — PRECISION/RECALL BENCHMARK")
     print("=" * 80)
     print(f"Date: {time.strftime('%Y-%m-%d %H:%M')}")
     print(f"Programs scanned: {len([r for r in all_results if not r.get('error')])}")
@@ -497,7 +497,7 @@ def main():
     md_path = os.path.join(RESULTS_DIR, "PRECISION_RECALL.md")
     with open(md_path, "w") as f:
         m = metrics["overall"]
-        f.write("# Shanon Scanner — Precision/Recall Benchmark\n\n")
+        f.write("# Proktor Scanner — Precision/Recall Benchmark\n\n")
         f.write(f"> Generated: {time.strftime('%Y-%m-%d %H:%M')}\n")
         f.write(f"> Scanner version: 0.1.0\n")
         f.write(f"> Validation: **Internally benchmarked** — TP/FP classifications pending independent review\n\n")

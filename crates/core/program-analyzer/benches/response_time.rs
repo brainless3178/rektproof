@@ -1,7 +1,7 @@
 //! API Response Time Benchmarks
 //!
 //! Measures endpoint response latency to establish performance baselines.
-//! Run with: `cargo bench --package shanon-api`
+//! Run with: `cargo bench --package proktor-api`
 //!
 //! Benchmarks are separated from tests to avoid conflating correctness
 //! validation with performance validation.

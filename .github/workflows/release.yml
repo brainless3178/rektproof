@@ -45,11 +45,11 @@ jobs:
 
       - name: Build release binary
         run: |
-          cargo build --release --target ${{ matrix.target }} -p shanon-cli
+          cargo build --release --target ${{ matrix.target }} -p proktor-cli
 
       - name: Package binary
         run: |
-          BINARY_NAME="shanon"
+          BINARY_NAME="proktor"
           ARCHIVE_NAME="${BINARY_NAME}-${{ github.ref_name }}-${{ matrix.target }}"
 
           mkdir -p dist
@@ -63,8 +63,8 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: shanon-${{ matrix.target }}
-          path: shanon-*.tar.gz
+          name: proktor-${{ matrix.target }}
+          path: proktor-*.tar.gz
 
   release:
     name: Create Release
@@ -80,33 +80,33 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          name: Shanon ${{ github.ref_name }}
+          name: Proktor ${{ github.ref_name }}
           draft: false
           prerelease: false
           files: artifacts/**/*.tar.gz
           body: |
-            ## 🛡️ Shanon ${{ github.ref_name }}
+            ## 🛡️ Proktor ${{ github.ref_name }}
 
             Enterprise-grade Solana Security Platform.
 
             ### Installation
 
             ```bash
-            curl -sSfL https://shanon.security/install.sh | sh
+            curl -sSfL https://proktor.security/install.sh | sh
             ```
 
             ### Quick Start
 
             ```bash
-            shanon scan ./programs/my-program    # 52+ vulnerability detectors
-            shanon guard                         # Dependency firewall
-            shanon --help                        # All commands
+            proktor scan ./programs/my-program    # 52+ vulnerability detectors
+            proktor guard                         # Dependency firewall
+            proktor --help                        # All commands
             ```
 
             ### What's Included
 
             - 52+ vulnerability detectors for Solana/Anchor programs
-            - Dependency firewall (shanon guard) for supply chain attack detection
+            - Dependency firewall (proktor guard) for supply chain attack detection
             - Firedancer validator compatibility checking
             - CPI dependency graph analysis
             - JSON output for CI/CD integration

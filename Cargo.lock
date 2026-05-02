@@ -1065,6 +1065,24 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8d696c370c750c948ada61c69a0ee2cbbb9c50b1019ddb86d9317157a99c2cae"
 
 [[package]]
+name = "bmc-verifier"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "log",
+ "petgraph",
+ "quote",
+ "serde",
+ "serde_json",
+ "syn 2.0.114",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "walkdir",
+ "z3",
+]
+
+[[package]]
 name = "borsh"
 version = "0.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1340,6 +1358,23 @@ dependencies = [
  "jobserver",
  "libc",
  "shlex",
+]
+
+[[package]]
+name = "cegar-verifier"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "log",
+ "quote",
+ "serde",
+ "serde_json",
+ "syn 2.0.114",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "walkdir",
+ "z3",
 ]
 
 [[package]]
@@ -4569,6 +4604,8 @@ dependencies = [
  "account-security-expert",
  "anchor-security-analyzer",
  "arithmetic-security-expert",
+ "bmc-verifier",
+ "cegar-verifier",
  "colored",
  "concolic-executor",
  "criterion",
@@ -4599,6 +4636,143 @@ dependencies = [
  "walkdir",
  "z3",
  "zeroize",
+]
+
+[[package]]
+name = "proktor-api"
+version = "0.1.0"
+dependencies = [
+ "actix-cors",
+ "actix-web",
+ "anchor-lang",
+ "anyhow",
+ "borsh 0.10.4",
+ "bs58 0.5.1",
+ "chrono",
+ "env_logger 0.10.2",
+ "program-analyzer",
+ "proktor-guard",
+ "proktor-oracle",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "solana-account-decoder",
+ "solana-client",
+ "solana-sdk",
+ "tempfile",
+ "token-security-expert",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "proktor-cli"
+version = "0.1.0"
+dependencies = [
+ "ai-enhancer",
+ "attack-simulator",
+ "benchmark-suite",
+ "certora-prover",
+ "clap 4.5.57",
+ "colored",
+ "compliance-reporter",
+ "concolic-executor",
+ "consensus-engine",
+ "cpi-analyzer",
+ "crossterm",
+ "crux-mir-analyzer",
+ "dotenvy",
+ "economic-verifier",
+ "firedancer-monitor",
+ "fuzzdelsol",
+ "fv-scanner-core",
+ "git-scanner",
+ "integration-orchestrator",
+ "kani-verifier",
+ "llm-strategist",
+ "program-analyzer",
+ "proktor-guard",
+ "proktor-monitor",
+ "proktor-verify",
+ "ratatui",
+ "secure-code-gen",
+ "security-fuzzer",
+ "serde_json",
+ "token-security-expert",
+ "tokio",
+ "transaction-forge",
+ "trident-fuzzer",
+ "wacana-analyzer",
+ "z3",
+]
+
+[[package]]
+name = "proktor-guard"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "colored",
+ "semver",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "strsim 0.11.1",
+ "tempfile",
+ "thiserror",
+ "toml 0.8.23",
+ "walkdir",
+]
+
+[[package]]
+name = "proktor-lsp"
+version = "0.1.0"
+dependencies = [
+ "program-analyzer",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tower-lsp",
+ "tracing",
+]
+
+[[package]]
+name = "proktor-monitor"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "solana-client",
+ "solana-sdk",
+ "thiserror",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "proktor-oracle"
+version = "0.1.0"
+dependencies = [
+ "anchor-lang",
+]
+
+[[package]]
+name = "proktor-verify"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "compliance-reporter",
+ "program-analyzer",
+ "serde",
+ "serde_json",
+ "solana-client",
+ "solana-sdk",
+ "syn 2.0.114",
+ "thiserror",
+ "walkdir",
 ]
 
 [[package]]
@@ -5435,143 +5609,6 @@ checksum = "75872d278a8f37ef87fa0ddbda7802605cb18344497949862c0d4dcb291eba60"
 dependencies = [
  "digest 0.10.7",
  "keccak",
-]
-
-[[package]]
-name = "shanon-api"
-version = "0.1.0"
-dependencies = [
- "actix-cors",
- "actix-web",
- "anchor-lang",
- "anyhow",
- "borsh 0.10.4",
- "bs58 0.5.1",
- "chrono",
- "env_logger 0.10.2",
- "program-analyzer",
- "reqwest",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "shanon-guard",
- "shanon-oracle",
- "solana-account-decoder",
- "solana-client",
- "solana-sdk",
- "tempfile",
- "token-security-expert",
- "tokio",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "shanon-cli"
-version = "0.1.0"
-dependencies = [
- "ai-enhancer",
- "attack-simulator",
- "benchmark-suite",
- "certora-prover",
- "clap 4.5.57",
- "colored",
- "compliance-reporter",
- "concolic-executor",
- "consensus-engine",
- "cpi-analyzer",
- "crossterm",
- "crux-mir-analyzer",
- "dotenvy",
- "economic-verifier",
- "firedancer-monitor",
- "fuzzdelsol",
- "fv-scanner-core",
- "git-scanner",
- "integration-orchestrator",
- "kani-verifier",
- "llm-strategist",
- "program-analyzer",
- "ratatui",
- "secure-code-gen",
- "security-fuzzer",
- "serde_json",
- "shanon-guard",
- "shanon-monitor",
- "shanon-verify",
- "token-security-expert",
- "tokio",
- "transaction-forge",
- "trident-fuzzer",
- "wacana-analyzer",
- "z3",
-]
-
-[[package]]
-name = "shanon-guard"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "colored",
- "semver",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "strsim 0.11.1",
- "tempfile",
- "thiserror",
- "toml 0.8.23",
- "walkdir",
-]
-
-[[package]]
-name = "shanon-lsp"
-version = "0.1.0"
-dependencies = [
- "program-analyzer",
- "serde",
- "serde_json",
- "tokio",
- "tower-lsp",
- "tracing",
-]
-
-[[package]]
-name = "shanon-monitor"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "reqwest",
- "serde",
- "serde_json",
- "solana-client",
- "solana-sdk",
- "thiserror",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "shanon-oracle"
-version = "0.1.0"
-dependencies = [
- "anchor-lang",
-]
-
-[[package]]
-name = "shanon-verify"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "compliance-reporter",
- "program-analyzer",
- "serde",
- "serde_json",
- "solana-client",
- "solana-sdk",
- "syn 2.0.114",
- "thiserror",
- "walkdir",
 ]
 
 [[package]]

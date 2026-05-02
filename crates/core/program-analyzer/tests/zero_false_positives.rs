@@ -1,6 +1,6 @@
 //! # Zero False Positives — Comprehensive Guarantee Test
 //!
-//! This test file is the GOLD STANDARD for rektproof's accuracy.
+//! This test file is the GOLD STANDARD for proktor's accuracy.
 //! Every test here verifies that properly secured, production-quality
 //! Solana/Anchor code produces ZERO findings.
 //!

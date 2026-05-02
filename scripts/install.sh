@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # ──────────────────────────────────────────────────────────
-# Shanon — Solana Security Platform
-# One-line installer: curl -sSfL https://shanon.security/install.sh | sh
+# Proktor — Solana Security Platform
+# One-line installer: curl -sSfL https://proktor.security/install.sh | sh
 # ──────────────────────────────────────────────────────────
 
 set -euo pipefail
 
-REPO="shanon-web3/shanon"
-BINARY_NAME="shanon"
-INSTALL_DIR="${SHANON_INSTALL_DIR:-$HOME/.shanon/bin}"
+REPO="proktor-security/proktor"
+BINARY_NAME="proktor"
+INSTALL_DIR="${PROKTOR_INSTALL_DIR:-$HOME/.proktor/bin}"
 
 # ─── Detect platform ────────────────────────────────────
 
@@ -54,10 +54,10 @@ install() {
     local platform version download_url archive_name
 
     platform="$(detect_platform)"
-    version="${SHANON_VERSION:-$(get_latest_version)}"
+    version="${PROKTOR_VERSION:-$(get_latest_version)}"
 
     echo ""
-    echo "  🛡️  Shanon — Solana Security Platform"
+    echo "  🛡️  Proktor — Solana Security Platform"
     echo "  ─────────────────────────────────────"
     echo "  Version:  ${version}"
     echo "  Platform: ${platform}"
@@ -76,12 +76,12 @@ install() {
     chmod +x "${INSTALL_DIR}/${BINARY_NAME}"
 
     echo ""
-    echo "  ✅ Shanon installed to ${INSTALL_DIR}/${BINARY_NAME}"
+    echo "  ✅ Proktor installed to ${INSTALL_DIR}/${BINARY_NAME}"
     echo ""
 
     # Shell PATH update hint
     if [[ ":$PATH:" != *":${INSTALL_DIR}:"* ]]; then
-        echo "  ⚠️  Add Shanon to your PATH:"
+        echo "  ⚠️  Add Proktor to your PATH:"
         echo ""
         echo "    export PATH=\"\$PATH:${INSTALL_DIR}\""
         echo ""
@@ -93,9 +93,9 @@ install() {
 
     echo "  Get started:"
     echo ""
-    echo "    shanon scan ./programs/my-program   # Vulnerability scan"
-    echo "    shanon guard                        # Dependency firewall"
-    echo "    shanon --help                       # All commands"
+    echo "    proktor scan ./programs/my-program   # Vulnerability scan"
+    echo "    proktor guard                        # Dependency firewall"
+    echo "    proktor --help                       # All commands"
     echo ""
 }
 

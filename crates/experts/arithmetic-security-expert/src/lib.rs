@@ -122,7 +122,24 @@ impl ArithmeticSecurityExpert {
     /// Returns all detected issues sorted by severity (highest first).
     pub fn analyze_source(source: &str) -> Result<Vec<ArithmeticIssue>> {
         let file = syn::parse_file(source)?;
-        let mut visitor = ArithmeticVisitor { issues: Vec::new() };
+
+        // Pre-scan: count how many checked_*/saturating_* calls exist in the source.
+        // If the developer uses checked math extensively, bare +/- operators are
+        // likely combining already-safe intermediate results (e.g., Ok(sum + product))
+        // and should NOT be flagged as UncheckedArithmetic.
+        let checked_count = source.matches("checked_add").count()
+            + source.matches("checked_sub").count()
+            + source.matches("checked_mul").count()
+            + source.matches("checked_div").count()
+            + source.matches("saturating_add").count()
+            + source.matches("saturating_sub").count()
+            + source.matches("saturating_mul").count();
+        let suppress_bare_ops = checked_count >= 2;
+
+        let mut visitor = ArithmeticVisitor {
+            issues: Vec::new(),
+            suppress_bare_ops,
+        };
         visitor.visit_file(&file);
         // Sort by severity descending
         visitor
@@ -142,6 +159,8 @@ impl ArithmeticSecurityExpert {
 
 struct ArithmeticVisitor {
     issues: Vec<ArithmeticIssue>,
+    /// If true, suppress bare +/- flagging because the file uses checked math
+    suppress_bare_ops: bool,
 }
 
 impl ArithmeticVisitor {
@@ -196,7 +215,9 @@ impl<'ast> Visit<'ast> for ArithmeticVisitor {
 
             // ── Unchecked addition (potential overflow) ──────────────
             BinOp::Add(_) => {
-                if !Self::is_likely_checked_context(&Expr::Binary(i.clone())) {
+                if !Self::is_likely_checked_context(&Expr::Binary(i.clone()))
+                    && !self.suppress_bare_ops
+                {
                     self.issues.push(ArithmeticIssue {
                         kind: ArithmeticIssueKind::UncheckedArithmetic,
                         line,
@@ -210,7 +231,9 @@ impl<'ast> Visit<'ast> for ArithmeticVisitor {
 
             // ── Unchecked subtraction (potential underflow) ──────────
             BinOp::Sub(_) => {
-                if !Self::is_likely_checked_context(&Expr::Binary(i.clone())) {
+                if !Self::is_likely_checked_context(&Expr::Binary(i.clone()))
+                    && !self.suppress_bare_ops
+                {
                     self.issues.push(ArithmeticIssue {
                         kind: ArithmeticIssueKind::UncheckedArithmetic,
                         line,

@@ -1,5 +1,5 @@
 # ──────────────────────────────────────────────────────────
-# Shanon — Solana Security Platform
+# Proktor — Solana Security Platform
 # Multi-stage Docker build
 # ──────────────────────────────────────────────────────────
 
@@ -9,7 +9,7 @@ WORKDIR /app
 COPY . .
 
 # Build the CLI binary and core libraries
-RUN cargo build --release -p shanon-cli -p shanon-guard -p program-analyzer
+RUN cargo build --release -p proktor-cli -p proktor-guard -p program-analyzer
 
 # ──────────────────────────────────────────────────────────
 FROM debian:bookworm-slim AS runtime
@@ -22,10 +22,10 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 # Copy built binaries
-COPY --from=builder /app/target/release/shanon /usr/local/bin/shanon
+COPY --from=builder /app/target/release/proktor /usr/local/bin/proktor
 
 # Healthcheck
-HEALTHCHECK --interval=30s --timeout=5s CMD shanon --version || exit 1
+HEALTHCHECK --interval=30s --timeout=5s CMD proktor --version || exit 1
 
-ENTRYPOINT ["shanon"]
+ENTRYPOINT ["proktor"]
 CMD ["--help"]

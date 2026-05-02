@@ -2,7 +2,7 @@
 //!
 //! ⚠️ DO NOT DEPLOY — This program contains deliberate vulnerabilities for
 //! automated security scanner testing. Every handler demonstrates a different
-//! class of Solana vulnerability that the Shanon Security Oracle should detect.
+//! class of Solana vulnerability that the Proktor Security Oracle should detect.
 
 use anchor_lang::prelude::*;
 

@@ -934,6 +934,10 @@ fn is_proven_safe(finding: &VulnerabilityFinding, ctx: &ProjectContext) -> bool 
                 if let Some(src) = ctx.source_index.get(&finding.location) {
                     let lines: Vec<&str> = src.lines().collect();
                     let line_idx = finding.line_number.saturating_sub(1);
+                    if line_idx >= lines.len() {
+                        // line_number is beyond the file — skip window analysis
+                        return false;
+                    }
                     let start = line_idx.saturating_sub(15);
                     let end = (line_idx + 15).min(lines.len());
                     let window: String = lines[start..end].join("\n");

@@ -2,7 +2,7 @@
 name = "compliance-reporter"
 version.workspace = true
 edition.workspace = true
-description = "Maps Shanon security findings to compliance frameworks (SOC2, ISO27001, OWASP)"
+description = "Maps Proktor security findings to compliance frameworks (SOC2, ISO27001, OWASP)"
 
 [dependencies]
 program-analyzer = { path = "../../core/program-analyzer" }

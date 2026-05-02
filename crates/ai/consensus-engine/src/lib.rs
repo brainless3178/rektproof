@@ -60,6 +60,7 @@ pub struct ConsensusEngine {
     models: Vec<LlmConfig>,
     threshold: f32,
     pub require_majority: bool,
+    base_url: Option<String>,
 }
 
 impl ConsensusEngine {
@@ -70,7 +71,14 @@ impl ConsensusEngine {
             models,
             threshold: 0.6,
             require_majority: true,
+            base_url: None,
         }
+    }
+
+    /// Set a custom base URL for all LLM requests (enterprise/self-hosted)
+    pub fn with_base_url(mut self, base_url: &str) -> Self {
+        self.base_url = Some(base_url.to_string());
+        self
     }
 
     /// Create with default OpenRouter models
@@ -160,11 +168,15 @@ Respond in this exact JSON format:
 
     /// Query a single LLM for its verdict
     async fn query_llm(&self, config: &LlmConfig, prompt: &str) -> Result<LlmVote, ConsensusError> {
-        let url = match config.provider {
-            LlmProvider::OpenRouter => "https://openrouter.ai/api/v1/chat/completions",
-            LlmProvider::OpenAI => "https://api.openai.com/v1/chat/completions",
-            LlmProvider::Anthropic => "https://api.anthropic.com/v1/messages",
-            LlmProvider::Nvidia => "https://integrate.api.nvidia.com/v1/chat/completions",
+        let url = if let Some(ref base_url) = self.base_url {
+            base_url.clone()
+        } else {
+            match config.provider {
+                LlmProvider::OpenRouter => "https://openrouter.ai/api/v1/chat/completions".to_string(),
+                LlmProvider::OpenAI => "https://api.openai.com/v1/chat/completions".to_string(),
+                LlmProvider::Anthropic => "https://api.anthropic.com/v1/messages".to_string(),
+                LlmProvider::Nvidia => "https://integrate.api.nvidia.com/v1/chat/completions".to_string(),
+            }
         };
 
         let request_body = serde_json::json!({
@@ -178,7 +190,7 @@ Respond in this exact JSON format:
 
         let response = self
             .client
-            .post(url)
+            .post(&url)
             .header("Authorization", format!("Bearer {}", config.api_key))
             .header("Content-Type", "application/json")
             .json(&request_body)

@@ -1,4 +1,4 @@
-# Solana Security Swarm CI/CD Pipeline
+# Proktor Security Swarm CI/CD Pipeline
 
 **Complete automated security audit pipeline for Solana smart contracts**
 
@@ -437,4 +437,4 @@ MIT License - See LICENSE file for details
 
 ---
 
-**Solana Security Swarm** — Comprehensive automated security for Solana smart contracts 🛡️
+**Proktor Security Swarm** — Comprehensive automated security for Solana smart contracts 🛡️

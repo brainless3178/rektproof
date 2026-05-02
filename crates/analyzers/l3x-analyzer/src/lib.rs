@@ -491,7 +491,7 @@ mod tests {
     #[test]
     fn test_analyze_nonexistent_returns_error() {
         let mut analyzer = L3xAnalyzer::new();
-        let result = analyzer.analyze_program(std::path::Path::new("/tmp/nonexistent_shanon_test"));
+        let result = analyzer.analyze_program(std::path::Path::new("/tmp/nonexistent_proktor_test"));
         assert!(result.is_err(), "nonexistent path should error");
     }
 }

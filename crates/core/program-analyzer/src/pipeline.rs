@@ -3,8 +3,12 @@
 
 use crate::VulnerabilityFinding;
 
-/// Populate empty `prevention` and `attack_scenario` fields from expert systems.
+/// Populate empty `prevention` and `attack_scenario` fields from expert systems
+/// and the vulnerability knowledge base (100 entries with real-world incidents).
 pub fn enrich_findings(findings: &mut Vec<VulnerabilityFinding>) {
+    // Load the knowledge base once for all findings
+    let kb = crate::vuln_knowledge_base::get_knowledge_base();
+
     for f in findings.iter_mut() {
         // Account security enrichment
         if let Some(insight) = account_security_expert::AccountSecurityExpert::get_insight_for_id(&f.id) {
@@ -19,6 +23,21 @@ pub fn enrich_findings(findings: &mut Vec<VulnerabilityFinding>) {
         if let Some(insight) = defi_security_expert::DeFiSecurityExpert::get_defense_for_id(&f.id) {
             if f.prevention.is_empty() {
                 f.prevention = insight.defense_strategy.clone();
+            }
+        }
+
+        // Knowledge base enrichment — match finding ID against KB detector_ids
+        // to pull in real-world incidents and attack descriptions.
+        if let Some(entry) = kb.iter().find(|e| {
+            e.detector_ids.iter().any(|d| *d == f.id)
+        }) {
+            if f.attack_scenario.is_empty() {
+                f.attack_scenario = entry.description.to_string();
+            }
+            if f.real_world_incident.is_none() {
+                if let Some(ref inc) = entry.real_incident {
+                    f.real_world_incident = Some(crate::Incident::from(inc));
+                }
             }
         }
     }

@@ -124,6 +124,8 @@ pub struct AIEnhancerConfig {
     pub max_tokens: u32,
     /// Enable Kimi K2.5 Thinking Mode (includes reasoning traces)
     pub thinking_mode: bool,
+    /// Custom base URL for self-hosted / enterprise AI endpoints
+    pub base_url: Option<String>,
 }
 
 impl Default for AIEnhancerConfig {
@@ -139,6 +141,7 @@ impl Default for AIEnhancerConfig {
             top_p: 0.95,
             max_tokens: 16384,
             thinking_mode: true,
+            base_url: None,
         }
     }
 }
@@ -156,9 +159,10 @@ pub struct AIEnhancer {
 }
 
 impl AIEnhancer {
-    pub fn new(api_key: String, model: String) -> Self {
+    pub fn new(api_key: String, model: String, base_url: Option<String>) -> Self {
         let config = AIEnhancerConfig {
             model,
+            base_url,
             ..Default::default()
         };
         Self::with_config(api_key, config)
@@ -353,7 +357,9 @@ CRITICAL: Output ONLY the raw JSON object. No markdown fencing. No preamble. No 
         };
 
         // ── Select API endpoint ────────────────────────────────────────
-        let api_url = if let Ok(custom_url) = std::env::var("LLM_BASE_URL") {
+        let api_url = if let Some(ref base_url) = self.config.base_url {
+            base_url.clone()
+        } else if let Ok(custom_url) = std::env::var("LLM_BASE_URL") {
             custom_url
         } else if is_nvidia || is_kimi {
             "https://integrate.api.nvidia.com/v1/chat/completions".to_string()
@@ -374,8 +380,8 @@ CRITICAL: Output ONLY the raw JSON object. No markdown fencing. No preamble. No 
 
         if !is_openai && !is_nvidia {
             req_builder = req_builder
-                .header("HTTP-Referer", "https://shanon.security")
-                .header("X-Title", "Shanon Security Auditor");
+                .header("HTTP-Referer", "https://proktor.security")
+                .header("X-Title", "Proktor Security Auditor");
         }
 
         info!(

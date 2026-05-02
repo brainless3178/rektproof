@@ -1,0 +1,20 @@
+[package]
+name = "bmc-verifier"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+z3 = "0.12"
+walkdir = { workspace = true }
+syn = { workspace = true, features = ["full", "visit"] }
+quote = { workspace = true }
+log = { workspace = true }
+thiserror = { workspace = true }
+petgraph = "0.6"
+
+[dev-dependencies]
+tempfile = { workspace = true }

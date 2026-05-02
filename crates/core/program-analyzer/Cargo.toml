@@ -23,7 +23,7 @@ rayon = "1.8"
 zeroize = { version = "1.3", features = ["zeroize_derive"] }
 once_cell = "1.19"
 tokio = { version = "1", features = ["rt"] }
-z3 = "0.12"
+z3 = { version = "0.12", optional = true }
 sec3-analyzer = { path = "../../analyzers/sec3-analyzer" }
 anchor-security-analyzer = { path = "../../analyzers/anchor-security-analyzer" }
 dataflow-analyzer = { path = "../../analyzers/dataflow-analyzer" }
@@ -32,15 +32,21 @@ geiger-analyzer = { path = "../../analyzers/geiger-analyzer" }
 arithmetic-security-expert = { path = "../../experts/arithmetic-security-expert" }
 invariant-miner = { path = "../../verification/invariant-miner" }
 l3x-analyzer = { path = "../../analyzers/l3x-analyzer" }
-concolic-executor = { path = "../../analyzers/concolic-executor" }
+concolic-executor = { path = "../../analyzers/concolic-executor", optional = true }
 security-fuzzer = { path = "../../fuzzing/security-fuzzer" }
 account-security-expert = { path = "../../experts/account-security-expert" }
 defi-security-expert = { path = "../../experts/defi-security-expert" }
-fv-layer1-verifier = { path = "../../verification/fv-layer1-verifier" }
-fv-layer2-verifier = { path = "../../verification/fv-layer2-verifier" }
-fv-layer3-verifier = { path = "../../verification/fv-layer3-verifier" }
-fv-layer4-verifier = { path = "../../verification/fv-layer4-verifier" }
+fv-layer1-verifier = { path = "../../verification/fv-layer1-verifier", optional = true }
+fv-layer2-verifier = { path = "../../verification/fv-layer2-verifier", optional = true }
+fv-layer3-verifier = { path = "../../verification/fv-layer3-verifier", optional = true }
+fv-layer4-verifier = { path = "../../verification/fv-layer4-verifier", optional = true }
 symbolic-engine = { path = "../../analyzers/symbolic-engine" }
+bmc-verifier = { path = "../../verification/bmc-verifier", optional = true }
+cegar-verifier = { path = "../../verification/cegar-verifier", optional = true }
+
+[features]
+default = []
+z3-formal = ["dep:z3"]
 
 [dev-dependencies]
 criterion = "0.5"

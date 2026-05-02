@@ -1,0 +1,10 @@
+{
+    "name": "proktor-action",
+    "version": "1.0.0",
+    "private": true,
+    "description": "Proktor Security — GitHub Action PR annotator",
+    "main": "annotate.js",
+    "dependencies": {
+        "@octokit/rest": "^20.0.0"
+    }
+}

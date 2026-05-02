@@ -352,17 +352,92 @@ pub struct CallEdge {
     pub line: usize,
 }
 
-/// Build a call graph from the AST.
+/// Known external crate functions that are security-sensitive sinks.
+/// These are not defined in the program but are called via CPI.
+/// The key is the function name pattern, the value describes its security impact.
+pub fn get_external_sink_functions() -> std::collections::HashMap<&'static str, (&'static str, TaintLevel)> {
+    let mut sinks = std::collections::HashMap::new();
+    
+    // Token program transfers - taint flows through the amount parameter to privileged operation
+    sinks.insert("transfer", ("SPL Token Transfer - amount reaches lamports", TaintLevel::Tainted));
+    sinks.insert("transfer_signed", ("SPL Token Transfer (signed) - amount reaches lamports", TaintLevel::Tainted));
+    sinks.insert("mint_to", ("SPL Token Mint - mint authority delegation risk", TaintLevel::Tainted));
+    sinks.insert("mint_to_checked", ("SPL Token Mint - amount from caller", TaintLevel::Tainted));
+    sinks.insert("burn", ("SPL Token Burn - supply manipulation", TaintLevel::Tainted));
+    sinks.insert("burn_checked", ("SPL Token Burn - supply manipulation", TaintLevel::Tainted));
+    sinks.insert("freeze", ("SPL Token Freeze - authority bypass risk", TaintLevel::Tainted));
+    sinks.insert("thaw", ("SPL Token Thaw - authority bypass risk", TaintLevel::Tainted));
+    sinks.insert("set_authority", ("SPL Token Authority Change - privilege escalation", TaintLevel::Tainted));
+    
+    // System program - SOL transfers
+    sinks.insert("transfer", ("System Transfer - lamport manipulation", TaintLevel::Tainted));
+    sinks.insert("assign", ("System Account Assign - ownership change", TaintLevel::Tainted));
+    sinks.insert("create_account", ("System Create Account - space/lamport allocation", TaintLevel::Tainted));
+    sinks.insert("allocate", ("System Allocate - account data manipulation", TaintLevel::Tainted));
+    
+    // Associated token program
+    sinks.insert("create", ("ATA Create - account initialization", TaintLevel::AccountInput));
+    sinks.insert("create_idempotent", ("ATA Create - account initialization", TaintLevel::AccountInput));
+    
+    // Token-2022 extensions
+    sinks.insert("transfer_checked", ("Token-2022 Transfer - amount reaches lamports", TaintLevel::Tainted));
+    sinks.insert("mint_to_checked", ("Token-2022 Mint - supply manipulation", TaintLevel::Tainted));
+    
+    sinks
+}
+
+/// Known external crate functions that are security-sensitive sources.
+/// These introduce taint into the program.
+pub fn get_external_source_functions() -> std::collections::HashMap<&'static str, (&'static str, TaintLevel)> {
+    let mut sources = std::collections::HashMap::new();
+    
+    // Oracle price feeds - external data that should be validated
+    sources.insert("get_price", ("Pyth Oracle - untrusted price data", TaintLevel::ExternalData));
+    sources.insert("get_price_unchecked", ("Pyth Oracle - untrusted price data", TaintLevel::ExternalData));
+    sources.insert("get_ema_price", ("Pyth Oracle EMA - untrusted price data", TaintLevel::ExternalData));
+    sources.insert("get_ema_price_unchecked", ("Pyth Oracle EMA - untrusted price data", TaintLevel::ExternalData));
+    sources.insert("get_account", ("Pyth Oracle Account - untrusted data", TaintLevel::ExternalData));
+    
+    // Switchboard oracle
+    sources.insert("fetch", ("Switchboard Feed - untrusted external data", TaintLevel::ExternalData));
+    sources.insert("get", ("Switchboard Feed - untrusted external data", TaintLevel::ExternalData));
+    sources.insert("get_value", ("Switchboard Value - untrusted external data", TaintLevel::ExternalData));
+    
+    // CPI return data - anything returned from external calls is tainted
+    sources.insert("invoke", ("CPI Return - external program data", TaintLevel::ExternalData));
+    sources.insert("invoke_signed", ("CPI Return - external program data", TaintLevel::ExternalData));
+    
+    sources
+}
+
+/// Build a call graph from the AST, including external CPI calls.
 ///
-/// Scans all function bodies for function call expressions and records
-/// caller → callee edges with argument information.
+/// Returns:
+/// - Internal call edges (within the program)
+/// - Function summaries
+/// 
+/// This version also detects calls to external crate functions (via CPI)
+/// and marks them as cross-crate edges.
 pub fn build_call_graph(source: &str) -> (Vec<CallEdge>, Vec<FunctionTaintSummary>) {
+    let (edges, summaries, _) = build_call_graph_extended(source);
+    (edges, summaries)
+}
+
+/// Build a call graph and also get external CPI edges (convenience wrapper)
+pub fn build_call_graph_with_external(source: &str) -> (Vec<CallEdge>, Vec<FunctionTaintSummary>, Vec<ExtendedCallEdge>) {
+    build_call_graph_extended(source)
+}
+
+/// Extended version that also returns external CPI edges for cross-crate analysis.
+/// Returns: (internal_edges, function_summaries, external_cpi_edges)
+pub fn build_call_graph_extended(source: &str) -> (Vec<CallEdge>, Vec<FunctionTaintSummary>, Vec<ExtendedCallEdge>) {
     let ast = match syn::parse_file(source) {
         Ok(f) => f,
-        Err(_) => return (Vec::new(), Vec::new()),
+        Err(_) => return (Vec::new(), Vec::new(), Vec::new()),
     };
 
     let mut edges = Vec::new();
+    let mut external_edges: Vec<ExtendedCallEdge> = Vec::new();
     let mut function_names: Vec<String> = Vec::new();
 
     // Collect all function names first
@@ -382,18 +457,18 @@ pub fn build_call_graph(source: &str) -> (Vec<CallEdge>, Vec<FunctionTaintSummar
         }
     }
 
-    // Scan function bodies for calls to known functions
+    // Scan function bodies for calls to known functions and external CPI calls
     for item in &ast.items {
         match item {
             Item::Fn(f) => {
                 let caller = f.sig.ident.to_string();
-                collect_call_edges(&caller, &f.block.stmts, &function_names, &mut edges);
+                collect_call_edges(&caller, &f.block.stmts, &function_names, &mut edges, &mut external_edges);
             }
             Item::Impl(imp) => {
                 for imp_item in &imp.items {
                     if let syn::ImplItem::Fn(f) = imp_item {
                         let caller = f.sig.ident.to_string();
-                        collect_call_edges(&caller, &f.block.stmts, &function_names, &mut edges);
+                        collect_call_edges(&caller, &f.block.stmts, &function_names, &mut edges, &mut external_edges);
                     }
                 }
             }
@@ -404,29 +479,50 @@ pub fn build_call_graph(source: &str) -> (Vec<CallEdge>, Vec<FunctionTaintSummar
     // Compute function summaries from intraprocedural results
     let summaries = compute_function_summaries(&ast);
 
-    (edges, summaries)
+    (edges, summaries, external_edges)
 }
 
-/// Collect call edges from function body statements.
+/// A call edge that can be either internal or external (cross-crate/CPI)
+#[derive(Debug, Clone)]
+pub enum CallEdgeType {
+    /// Internal call to a function defined in the same program
+    Internal,
+    /// External call via CPI to another program (e.g., token transfer, system program)
+    External { program: String, description: String },
+}
+
+/// Extended call edge with type information
+#[derive(Debug, Clone)]
+pub struct ExtendedCallEdge {
+    pub caller: String,
+    pub callee: String,
+    pub arguments: Vec<String>,
+    pub line: usize,
+    pub edge_type: CallEdgeType,
+}
+
+/// Collect call edges from function body statements, including external CPI calls.
 fn collect_call_edges(
     caller: &str,
     stmts: &[Stmt],
     known_functions: &[String],
     edges: &mut Vec<CallEdge>,
+    external_edges: &mut Vec<ExtendedCallEdge>,
 ) {
+    let external_sinks = get_external_sink_functions();
+    let external_sources = get_external_source_functions();
+    
     for stmt in stmts {
         let code = stmt.to_token_stream().to_string();
         let line = token_line(stmt);
 
+        // Check for internal function calls
         for func_name in known_functions {
-            // Look for function calls: `func_name(...)` or `func_name (...)` or `Self::func_name(...)`
-            // Token streams may add spaces before parentheses
             if code.contains(&format!("{}(", func_name))
                 || code.contains(&format!("{} (", func_name))
                 || code.contains(&format!(":: {} (", func_name))
                 || code.contains(&format!("::{}(", func_name))
             {
-                // Extract arguments (simplified: take content between parentheses)
                 let arguments = extract_call_arguments(&code, func_name);
                 edges.push(CallEdge {
                     caller: caller.to_string(),
@@ -434,6 +530,71 @@ fn collect_call_edges(
                     arguments,
                     line,
                 });
+            }
+        }
+        
+        // Check for external CPI calls (anchor_spl, system_program, etc.)
+        detect_external_calls(caller, &code, line, &external_sinks, &external_sources, external_edges);
+    }
+}
+
+/// Detect external crate calls (CPI) and add them as cross-crate edges.
+fn detect_external_calls(
+    caller: &str,
+    code: &str,
+    line: usize,
+    external_sinks: &std::collections::HashMap<&'static str, (&'static str, TaintLevel)>,
+    external_sources: &std::collections::HashMap<&'static str, (&'static str, TaintLevel)>,
+    external_edges: &mut Vec<ExtendedCallEdge>,
+) {
+    // Common external crate module paths
+    let external_patterns = [
+        "anchor_spl::token::",
+        "anchor_spl::associated_token::",
+        "anchor_spl::token_2022::",
+        "solana_program::program::invoke",
+        "solana_program::program::invoke_signed",
+        "system_instruction::",
+        "pyth::",
+        "switchboard::",
+    ];
+    
+    for pattern in external_patterns {
+        if code.contains(pattern) {
+            // Extract the actual function being called
+            if let Some(call_start) = code.find(pattern) {
+                let after_pattern = &code[call_start + pattern.len()..];
+                // Get function name (up to parenthesis)
+                let func_name: String = after_pattern.chars()
+                    .take_while(|c| c.is_alphanumeric() || *c == '_')
+                    .collect();
+                
+                if !func_name.is_empty() {
+                    // Determine if this is a sink or source
+                    if let Some((desc, _)) = external_sinks.get(func_name.as_str()) {
+                        external_edges.push(ExtendedCallEdge {
+                            caller: caller.to_string(),
+                            callee: format!("{}::{}", pattern.trim_end_matches("::"), func_name),
+                            arguments: extract_call_arguments(&code, &func_name),
+                            line,
+                            edge_type: CallEdgeType::External { 
+                                program: pattern.trim_end_matches("::").to_string(),
+                                description: desc.to_string(),
+                            },
+                        });
+                    } else if let Some((desc, level)) = external_sources.get(func_name.as_str()) {
+                        external_edges.push(ExtendedCallEdge {
+                            caller: caller.to_string(),
+                            callee: format!("{}::{}", pattern.trim_end_matches("::"), func_name),
+                            arguments: extract_call_arguments(&code, &func_name),
+                            line,
+                            edge_type: CallEdgeType::External { 
+                                program: pattern.trim_end_matches("::").to_string(),
+                                description: format!("{} (taint level: {:?})", desc, level),
+                            },
+                        });
+                    }
+                }
             }
         }
     }
@@ -939,6 +1100,354 @@ fn is_keyword(s: &str) -> bool {
         | "u64" | "u128" | "i8" | "i16" | "i32" | "i64" | "i128" | "usize"
         | "isize" | "bool" | "str" | "String" | "Ok" | "Err" | "Some" | "None"
         | "Result" | "Option" | "Vec")
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//  Cross-Crate CPI Vulnerability Detection
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+/// Detect vulnerabilities from cross-crate CPI (cross-program invocation) calls.
+/// This analyzes external program calls (token transfers, system program, etc.)
+/// and checks for common vulnerability patterns in how they're invoked.
+///
+/// Returns vulnerability findings for issues like:
+/// - Unchecked CPI return values
+/// - Missing signer verification before CPI
+/// - Delegate authority without proper checks
+/// - Oracle data used in CPI without validation
+pub fn detect_cross_crate_vulnerabilities(
+    external_edges: &[ExtendedCallEdge],
+    raw_sources: &[(String, String)],
+) -> Vec<VulnerabilityFinding> {
+    let mut findings = Vec::new();
+    
+    // Known dangerous CPI patterns
+    // Pattern, description, severity (5=Critical, 4=High, 3=Medium)
+    // ORDER MATTERS: More specific patterns must come first (before shorter substrings)
+    let dangerous_patterns: Vec<(&str, &str, u8)> = vec![
+        // Token-2022 extensions (most specific - check first)
+        ("transfer_checked", "Token-2022 transfer - amount reaches lamports", 5),
+        ("freeze_account", "Token-2022 freeze - fund lock risk", 4),
+        ("thaw_account", "Token-2022 thaw - unfreeze without auth", 4),
+        
+        // System Program operations (specific names first)
+        ("system_transfer", "System transfer - SOL manipulation", 5),
+        ("system_create_account", "System create account - lamport/space allocation", 4),
+        ("withdraw_nonce", "Nonce withdrawal - could drain validator", 5),
+        ("advance_nonce", "Nonce advancement - state manipulation", 4),
+        
+        // SPL Token operations (specific variants first)
+        ("transfer_signed", "Unchecked token transfer with signer - could drain vault", 5),
+        ("mint_to_checked", "Unchecked token mint - supply manipulation risk", 5),
+        ("burn_checked", "Unchecked token burn - supply manipulation risk", 5),
+        
+        // Base SPL Token operations (come after their _checked variants)
+        ("mint_to", "Unchecked token mint - could exceed supply limits", 5),
+        ("burn", "Unchecked token burn - could destroy user funds", 5),
+        ("freeze", "Unchecked token freeze - could lock user funds", 4),
+        ("thaw", "Unchecked token thaw - could unfreeze without authorization", 4),
+        ("set_authority", "Authority change without proper validation - privilege escalation", 5),
+        ("close_account", "Account closure without proper validation", 4),
+        ("close", "Account closure - could drain account lamports", 4),
+        ("transfer", "Unchecked token transfer - amount parameter could be attacker-controlled", 5),
+        
+        // Associated Token Account
+        ("ata_create", "ATA creation - account initialization", 3),
+        ("create_idempotent", "ATA creation - account initialization", 3),
+        ("recover", "ATA recovery - could reclaim funds", 4),
+        
+        // System Program (generic - come after specific)
+        ("allocate", "System allocate - account data manipulation", 4),
+        ("assign", "System assign - ownership change", 5),
+    ];
+    
+    for edge in external_edges {
+        // Check if this is a dangerous CPI call
+        let callee_lower = edge.callee.to_lowercase();
+        for (pattern, description, default_severity) in &dangerous_patterns {
+            if callee_lower.contains(pattern) {
+                // Analyze the source to check for proper validation before this CPI
+                let validation = check_cpi_validation(raw_sources, &edge.caller, pattern);
+                
+                if !validation.has_signer_check || !validation.has_amount_validation {
+                    // Use the pattern severity, but escalate if signer check is missing
+                    let severity = if !validation.has_signer_check { 5 } else { *default_severity };
+                    let severity_label = match severity {
+                        5 => "Critical",
+                        4 => "High",
+                        3 => "Medium",
+                        _ => "Medium",
+                    };
+                    
+                    findings.push(VulnerabilityFinding {
+                        category: "Cross-Crate CPI".into(),
+                        vuln_type: format!("Unvalidated CPI Call: {}", edge.callee),
+                        severity,
+                        severity_label: severity_label.into(),
+                        id: format!("SOL-CPI-{}", pattern),
+                        cwe: Some("CWE-346".into()),
+                        location: validation.file.clone(),
+                        function_name: edge.caller.clone(),
+                        line_number: edge.line,
+                        vulnerable_code: format!("{}(...) at line {} in {}", 
+                            edge.callee, edge.line, edge.caller),
+                        description: format!(
+                            "Cross-crate CPI call to {}: {}. {}, Line: {}",
+                            edge.callee, description,
+                            if !validation.has_signer_check { "Missing signer verification" } 
+                            else { "Missing amount validation" },
+                            edge.line
+                        ),
+                        attack_scenario: format!(
+                            "An attacker could invoke {} with manipulated parameters {}, \
+                             potentially draining funds or escalating privileges.",
+                            edge.caller,
+                            if !validation.has_signer_check { 
+                                "without proper signer authorization" 
+                            } else { 
+                                "without validating amounts" 
+                            }
+                        ),
+                        real_world_incident: None,
+                        secure_fix: format!(
+                            "Add {} validation before the CPI call in {}.",
+                            if !validation.has_signer_check { "signer" } else { "amount" },
+                            edge.caller
+                        ),
+                        prevention: "Always validate signer authority and parameter bounds before CPI calls.".into(),
+                        confidence: if !validation.has_signer_check { 80 } else { 70 },
+                    });
+                }
+            }
+        }
+        
+        // Check for oracle data used in CPI without validation
+        if callee_lower.contains("pyth") || callee_lower.contains("oracle") || callee_lower.contains("switchboard") {
+            let validation = check_oracle_validation(raw_sources, &edge.caller);
+            if !validation.price_validated {
+                findings.push(VulnerabilityFinding {
+                    category: "Cross-Crate CPI".into(),
+                    vuln_type: "Unvalidated Oracle Data in CPI".into(),
+                    severity: 4,
+                    severity_label: "High".into(),
+                    id: "SOL-CPI-02".into(),
+                    cwe: Some("CWE-20".into()),
+                    location: validation.file.clone(),
+                    function_name: edge.caller.clone(),
+                    line_number: edge.line,
+                    vulnerable_code: format!("Oracle data from {} used in CPI without validation", edge.callee),
+                    description: format!(
+                        "Oracle price/confidence data from {} is used in a CPI call \
+                         without proper validation. Stale or manipulated oracle data \
+                         could lead to under-collateralized positions.",
+                        edge.callee
+                    ),
+                    attack_scenario: "Attacker manipulates oracle price to trigger favorable \
+                        conditions in the protocol, then executes CPI to drain funds.".into(),
+                    real_world_incident: None,
+                    secure_fix: format!(
+                        "Add oracle price/confidence validation in {} before using in CPI.",
+                        edge.caller
+                    ),
+                    prevention: "Always validate oracle freshness and confidence thresholds before use.".into(),
+                    confidence: 65,
+                });
+            }
+        }
+    }
+    
+    findings
+}
+
+/// Check if a CPI call has proper validation
+struct CpiValidationResult {
+    has_signer_check: bool,
+    has_amount_validation: bool,
+    file: String,
+}
+
+/// Find a function in source code using improved pattern matching.
+/// Handles: fn, pub fn, async fn, pub async fn, and methods in impl blocks.
+fn find_function_in_source(source: &str, fn_name: &str) -> Option<(usize, usize)> {
+    use regex::Regex;
+    
+    // Match various function declaration patterns:
+    // - fn name(
+    // - pub fn name(
+    // - async fn name(
+    // - pub async fn name(
+    // Also handle impl blocks: fn name(
+    let patterns = [
+        format!(r"(?:pub\s+)?(?:async\s+)?fn\s+{}\s*\(", fn_name),
+        // For impl blocks, search for the function within the impl - we'll find the fn pattern separately
+        format!(r"fn\s+{}\s*\(", fn_name),
+    ];
+    
+    for pattern in &patterns {
+        if let Ok(re) = Regex::new(pattern) {
+            if let Some(m) = re.find(source) {
+                let start = m.start();
+                // Find the matching closing brace for impl blocks
+                let end = if pattern.contains("impl") {
+                    find_impl_block_end(source, start)
+                } else {
+                    find_function_end(source, start)
+                };
+                return Some((start, end));
+            }
+        }
+    }
+    
+    None
+}
+
+/// Find the end of a function by counting braces
+fn find_function_end(source: &str, start: usize) -> usize {
+    let remaining = &source[start..];
+    let mut brace_count = 0;
+    let mut found_open = false;
+    
+    for (i, ch) in remaining.char_indices() {
+        match ch {
+            '{' => {
+                found_open = true;
+                brace_count += 1;
+            }
+            '}' => {
+                brace_count -= 1;
+                if found_open && brace_count == 0 {
+                    return start + i + 1;
+                }
+            }
+            _ => {}
+        }
+    }
+    // Default: return 5000 chars if we can't find the end
+    (start + 5000).min(source.len())
+}
+
+/// Find the end of an impl block
+fn find_impl_block_end(source: &str, start: usize) -> usize {
+    find_function_end(source, start)
+}
+
+fn check_cpi_validation(
+    raw_sources: &[(String, String)],
+    caller_fn: &str,
+    _cpi_method: &str,
+) -> CpiValidationResult {
+    let mut has_signer_check = false;
+    let mut has_amount_validation = false;
+    let mut file = String::new();
+    
+    for (filename, source) in raw_sources {
+        // Find the caller function using improved matching
+        if let Some((fn_start, fn_end)) = find_function_in_source(source, caller_fn) {
+            file = filename.clone();
+            
+            // Extract the function content
+            let fn_content = &source[fn_start..fn_end];
+            
+            // Check for signer verification patterns
+            if fn_content.contains("require_signed")
+                || fn_content.contains(".is_signer")
+                || fn_content.contains("assert_keys_equal")
+                || (fn_content.contains("require!") && fn_content.contains("signer"))
+                || fn_content.contains("require_eq!") && fn_content.contains("authority")
+            {
+                has_signer_check = true;
+            }
+            
+            // Check for amount validation patterns
+            if fn_content.contains("require!") 
+                && (fn_content.contains("amount > 0") || fn_content.contains("amount <")
+                    || fn_content.contains("> 0") || fn_content.contains("<= max")
+                    || fn_content.contains("amount <= ") || fn_content.contains("amount >="))
+            {
+                has_amount_validation = true;
+            }
+            
+            // Also check for checked arithmetic patterns
+            if fn_content.contains("checked_") 
+                || fn_content.contains("try_add") 
+                || fn_content.contains("try_sub")
+                || fn_content.contains("try_mul")
+                || fn_content.contains("checked_add")
+                || fn_content.contains("checked_sub")
+            {
+                has_amount_validation = true;
+            }
+            
+            break;
+        }
+    }
+    
+    CpiValidationResult {
+        has_signer_check,
+        has_amount_validation,
+        file,
+    }
+}
+
+/// Check if oracle data is properly validated before use in CPI
+struct OracleValidationResult {
+    price_validated: bool,
+    file: String,
+}
+
+fn check_oracle_validation(
+    raw_sources: &[(String, String)],
+    caller_fn: &str,
+) -> OracleValidationResult {
+    let mut price_validated = false;
+    let mut file = String::new();
+    
+    for (filename, source) in raw_sources {
+        // Find the caller function using improved matching
+        if let Some((fn_start, fn_end)) = find_function_in_source(source, caller_fn) {
+            file = filename.clone();
+            let fn_content = &source[fn_start..fn_end];
+            
+            // Check for oracle validation patterns
+            if fn_content.contains("confidence") 
+                || fn_content.contains(".price")
+                || fn_content.contains("pyth::")
+                || fn_content.contains("switchboard")
+            {
+                // Check if there's validation logic
+                if fn_content.contains("require!") 
+                    && (fn_content.contains("confidence") || fn_content.contains("price > 0")
+                        || fn_content.contains(".valid") || fn_content.contains("stale")
+                        || fn_content.contains("status == ") || fn_content.contains("conf > "))
+                {
+                    price_validated = true;
+                }
+                
+                // Check for switchboard validation patterns
+                if fn_content.contains("switchboard") 
+                    && (fn_content.contains("result.is_ok()") || fn_content.contains("result.ok()")
+                        || fn_content.contains("is_err()"))
+                {
+                    price_validated = true;
+                }
+                
+                // Check for Pyth-specific validation
+                if fn_content.contains("pyth") 
+                    && (fn_content.contains("price_confidence") || fn_content.contains("price_ema")
+                        || fn_content.contains(".valid") || fn_content.contains("conf < "))
+                {
+                    price_validated = true;
+                }
+            }
+            
+            break;
+        }
+    }
+    
+    OracleValidationResult {
+        price_validated,
+        file,
+    }
 }
 
 /// Detect security-critical sinks in a statement.

@@ -1,6 +1,6 @@
 //! # Compliance Reporter
 //!
-//! Maps Shanon's 52+ vulnerability detectors to enterprise compliance frameworks
+//! Maps Proktor's 52+ vulnerability detectors to enterprise compliance frameworks
 //! and generates audit-ready compliance reports.
 //!
 //! ## Supported Frameworks

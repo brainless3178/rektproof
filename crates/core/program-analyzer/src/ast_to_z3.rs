@@ -35,6 +35,8 @@ use crate::VulnerabilityFinding;
 use quote::ToTokens;
 use std::collections::HashMap;
 use syn::{Expr, Item, Stmt};
+
+#[cfg(feature = "z3-formal")]
 use z3::ast::Ast;
 
 /// Result of Z3-based verification for a single property.
@@ -334,12 +336,16 @@ fn extract_var_names(expr: &Expr) -> Vec<String> {
 }
 
 /// Verify extracted properties using Z3.
-///
-/// For each property, constructs a Z3 context and solver:
-/// 1. Declare BV64 variables for each parameter
-/// 2. Assert the NEGATION of the property (checking for violations)
-/// 3. If SAT → violation found (with counterexample)
-/// 4. If UNSAT → property proven safe
+#[cfg(not(feature = "z3-formal"))]
+fn verify_properties(properties: &[VerifiableProperty]) -> Vec<Z3VerificationResult> {
+    properties.iter().map(|p| Z3VerificationResult::Unknown {
+        property: p.description.clone(),
+        reason: "Z3 formal verification is disabled in this build".into(),
+    }).collect()
+}
+
+/// Verify extracted properties using Z3.
+#[cfg(feature = "z3-formal")]
 fn verify_properties(properties: &[VerifiableProperty]) -> Vec<Z3VerificationResult> {
     let mut results = Vec::new();
 
@@ -355,6 +361,7 @@ fn verify_properties(properties: &[VerifiableProperty]) -> Vec<Z3VerificationRes
 }
 
 /// Verify a single property using Z3 BV64 constraints.
+#[cfg(feature = "z3-formal")]
 fn verify_single_property(
     ctx: &z3::Context,
     prop: &VerifiableProperty,
@@ -469,6 +476,7 @@ fn verify_single_property(
 }
 
 /// Find a BV variable by name (handles dotted names like "state.balance")
+#[cfg(feature = "z3-formal")]
 fn find_var<'a>(
     vars: &'a HashMap<String, z3::ast::BV<'a>>,
     name: &str,
@@ -479,6 +487,7 @@ fn find_var<'a>(
 }
 
 /// Check solver result and generate Z3VerificationResult.
+#[cfg(feature = "z3-formal")]
 fn check_solver_result(
     solver: &z3::Solver,
     prop: &VerifiableProperty,

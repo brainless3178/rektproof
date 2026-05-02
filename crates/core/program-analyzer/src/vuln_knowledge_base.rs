@@ -10,7 +10,7 @@
 //! - Neodyme, Zellic, OtterSec audit findings
 //! - Real CVEs (CVE-2022-23066, CVE-2024-54134)
 //!
-//! Each entry maps to rektproof detector IDs where coverage exists.
+//! Each entry maps to proktor detector IDs where coverage exists.
 
 /// A single vulnerability entry in the knowledge base.
 #[derive(Debug, Clone)]
@@ -271,8 +271,8 @@ pub fn get_knowledge_base() -> Vec<VulnEntry> {
     VulnEntry {
         kb_id: "KB-028", name: "Unsafe Cast Truncation", category: "Arithmetic",
         severity: "Medium", cwe: "CWE-681", owasp_sc: "SC08",
-        detector_ids: &[], detected: false,
-        detection_technique: "Not implemented",
+        detector_ids: &["SOL-090"], detected: true,
+        detection_technique: "Pattern-based AST check",
         description: "Casting u128 to u64 silently truncates upper bits",
         real_incident: None, solana_specific: false,
     },

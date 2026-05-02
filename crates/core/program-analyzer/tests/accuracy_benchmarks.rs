@@ -1,4 +1,4 @@
-//! # Accuracy Benchmarks for Shanon Security Scanner
+//! # Accuracy Benchmarks for Proktor Security Scanner
 //!
 //! Validates detector accuracy against the three intentionally vulnerable
 //! programs shipped with the repo:
@@ -319,7 +319,7 @@ fn accuracy_aggregate_summary() {
     let aggregate_recall = (total_detected as f64 / total_expected as f64) * 100.0;
 
     println!("\n══════════════════════════════════════════════════════");
-    println!("           SHANON ACCURACY SUMMARY");
+    println!("           PROKTOR ACCURACY SUMMARY");
     println!("══════════════════════════════════════════════════════");
     println!("  Vault:   {}/{} detected ({:.0}%)  [{} total findings]",
         v_det, v_tot, (v_det as f64 / v_tot as f64) * 100.0, vault_findings.len());

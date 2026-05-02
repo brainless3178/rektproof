@@ -34,6 +34,8 @@ members = [
     "crates/verification/crux-mir-analyzer",
     "crates/verification/invariant-miner",
     "crates/verification/economic-verifier",
+    "crates/verification/cegar-verifier",
+    "crates/verification/bmc-verifier",
 
     # ── Fuzzing ──────────────────────────────────────────────────────
     "crates/fuzzing/security-fuzzer",
@@ -51,12 +53,12 @@ members = [
     "crates/ai/secure-code-gen",
 
     # ── Infrastructure ───────────────────────────────────────────────
-    "crates/infra/shanon-cli",
-    "crates/infra/shanon-api",
-    "crates/infra/shanon-lsp",
-    "crates/infra/shanon-guard",
-    "crates/infra/shanon-monitor",
-    "crates/infra/shanon-verify",
+    "crates/infra/proktor-cli",
+    "crates/infra/proktor-api",
+    "crates/infra/proktor-lsp",
+    "crates/infra/proktor-guard",
+    "crates/infra/proktor-monitor",
+    "crates/infra/proktor-verify",
     "crates/infra/firedancer-monitor",
     "crates/infra/compliance-reporter",
     "crates/infra/git-scanner",
@@ -64,7 +66,7 @@ members = [
     "crates/infra/integration-orchestrator",
 
     # ── Solana Programs ──────────────────────────────────────────────
-    "programs/shanon-oracle",
+    "programs/proktor-oracle",
     "programs/vulnerable-vault",
     "programs/vulnerable-token",
     "programs/vulnerable-staking",
@@ -76,18 +78,18 @@ members = [
 
 default-members = [
     "crates/core/program-analyzer",
-    "crates/infra/shanon-cli",
-    "crates/infra/shanon-api",
-    "crates/infra/shanon-guard",
-    "crates/infra/shanon-monitor",
-    "crates/infra/shanon-verify",
-    "crates/infra/shanon-lsp",
+    "crates/infra/proktor-cli",
+    "crates/infra/proktor-api",
+    "crates/infra/proktor-guard",
+    "crates/infra/proktor-monitor",
+    "crates/infra/proktor-verify",
+    "crates/infra/proktor-lsp",
     "crates/experts/token-security-expert",
     "crates/infra/firedancer-monitor",
     "crates/analyzers/cpi-analyzer",
     "crates/ai/ai-enhancer",
     "crates/infra/compliance-reporter",
-    "programs/shanon-oracle",
+    "programs/proktor-oracle",
     "programs/vulnerable-vault",
     "programs/vulnerable-token",
     "programs/vulnerable-staking",
@@ -131,7 +133,7 @@ solana-transaction-status = "1.18"
 solana-account-decoder = "1.18"
 
 # Symbolic Execution
-# z3 = { version = "0.12", features = ["static-link-z3"] }
+z3 = { version = "0.12", features = ["static-link-z3"] }
 
 # Rust Parsing
 syn = { version = "2.0", features = ["full", "extra-traits"] }
@@ -150,6 +152,8 @@ reqwest = { version = "0.11", features = ["json"] }
 # Utilities
 thiserror = "1.0"
 anyhow = "1.0"
+petgraph = "0.6"
+tempfile = "3.8"
 clap = { version = "4.4", features = ["derive", "env"] }
 walkdir = "2.4"
 bs58 = "0.5"

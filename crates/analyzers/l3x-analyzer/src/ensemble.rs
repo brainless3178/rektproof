@@ -70,10 +70,10 @@ impl EnsembleScorer {
             DetectionMethod::ControlFlowGNN { .. } => self.weights.control_flow_gnn,
             DetectionMethod::AnomalyDetection { .. } => self.weights.anomaly_detection,
             DetectionMethod::PatternLearning { .. } => self.weights.pattern_learning,
-            DetectionMethod::Ensemble { .. } => 1.0,
+            DetectionMethod::Ensemble { .. } => 0.5,
         };
 
-        // Weighted score with severity boost
+        // Severity boost adjusts final score up or down slightly
         let severity_boost = match finding.severity {
             crate::report::L3xSeverity::Critical => 1.2,
             crate::report::L3xSeverity::High => 1.1,
@@ -82,7 +82,10 @@ impl EnsembleScorer {
             crate::report::L3xSeverity::Info => 0.8,
         };
 
-        (base_confidence * method_weight * severity_boost).min(0.99)
+        // Use method_weight as a bonus modifier (0.5 + weight) rather than a
+        // direct multiplier, so that a weight of 0.25 becomes a factor of 0.75
+        // instead of crushing the confidence to ~25% of its original value.
+        (base_confidence * (0.5 + method_weight) * severity_boost).min(0.99)
     }
 }
 

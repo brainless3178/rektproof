@@ -1,5 +1,5 @@
 #![allow(dead_code)]
-//! Benchmark Suite for Solana Security Swarm
+//! Benchmark Suite for Proktor Security Swarm
 //!
 //! Provides benchmarking utilities for measuring analysis performance
 //! and comparing results across different analyzers.

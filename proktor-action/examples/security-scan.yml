@@ -1,0 +1,42 @@
+# ──────────────────────────────────────────────────────────
+# Example: Add this to your Solana project's .github/workflows/
+# One-line Proktor Security integration
+# ──────────────────────────────────────────────────────────
+
+name: Proktor Security
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write
+  checks: write
+
+jobs:
+  security-scan:
+    name: 🛡️ Proktor Security Scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run Proktor Security Scan
+        id: proktor
+        uses: proktor-security/proktor-action@v1
+        with:
+          program-path: './programs/'
+          fail-on: 'critical,high'
+          guard: 'true'
+          annotate: 'true'
+
+      - name: Check Results
+        if: always()
+        run: |
+          echo "Risk Score: ${{ steps.proktor.outputs.risk-score }}"
+          echo "Findings:   ${{ steps.proktor.outputs.findings-count }}"
+          echo "Critical:   ${{ steps.proktor.outputs.critical-count }}"

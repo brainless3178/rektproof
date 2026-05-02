@@ -39,6 +39,10 @@ pub struct AnalyzerConfig {
     #[serde(default = "default_output_format")]
     pub output_format: String,
 
+    /// Shadow mode for new fixpoint engine
+    #[serde(default = "default_false")]
+    pub shadow_fixpoint: bool,
+
     /// Custom patterns file path
     #[serde(default)]
     pub custom_patterns_file: Option<String>,
@@ -78,6 +82,9 @@ fn default_min_severity() -> u8 {
 fn default_true() -> bool {
     true
 }
+fn default_false() -> bool {
+    false
+}
 fn default_output_format() -> String {
     "markdown".to_string()
 }
@@ -107,6 +114,7 @@ impl Default for AnalyzerConfig {
             parallel_analysis: default_true(),
             max_findings_per_file: 0,
             output_format: default_output_format(),
+            shadow_fixpoint: false,
             custom_patterns_file: None,
             thresholds: AnalysisThresholds::default(),
         }

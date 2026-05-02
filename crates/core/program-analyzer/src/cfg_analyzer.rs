@@ -80,6 +80,8 @@ pub struct CfgStatement {
     pub code: String,
     pub kind: StmtKind,
     pub function_name: String,
+    /// The original AST statement for semantic analysis (Step 5+)
+    pub raw: Option<syn::Stmt>,
 }
 
 /// The control flow graph for a single function.
@@ -121,6 +123,7 @@ impl ControlFlowGraph {
                 code: code.clone(),
                 kind,
                 function_name: fn_name.to_string(),
+                raw: Some(stmt.clone()),
             };
 
             blocks.push(BasicBlock {

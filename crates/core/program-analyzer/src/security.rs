@@ -121,37 +121,101 @@ pub mod validation {
 }
 
 pub mod sandbox {
-    //! # Sandboxing Guidelines
+    //! # Analysis Sandboxing
     //!
-    //! When analyzing untrusted code, consider:
-    //!
-    //! 1. **Resource limits**: Use `rlimit` to cap CPU and memory
-    //! 2. **Filesystem isolation**: Use a temp directory
-    //! 3. **Network isolation**: No network access needed for analysis
-    //! 4. **Process isolation**: Consider running in a container
-    //!
-    //! ## Example using nix crate
-    //!
-    //! ```ignore
-    //! use nix::sys::resource::{setrlimit, Resource};
-    //!
-    //! // Limit to 60 seconds of CPU
-    //! setrlimit(Resource::RLIMIT_CPU, 60, 60)?;
-    //!
-    //! // Limit to 1GB of memory  
-    //! setrlimit(Resource::RLIMIT_AS, 1 << 30, 1 << 30)?;
-    //! ```
-    //!
-    //! ## Container recommendation
-    //!
-    //! ```dockerfile
-    //! FROM rust:slim
-    //! RUN useradd -m analyzer
-    //! USER analyzer
-    //! WORKDIR /analysis
-    //! COPY --chown=analyzer analyzer /usr/local/bin/
-    //! CMD ["analyzer", "--sandbox"]
-    //! ```
+    //! Provides resource-limit guards to prevent untrusted code analysis
+    //! from consuming unbounded CPU or memory.
+
+    use std::time::{Duration, Instant};
+
+    /// A guard that enforces a wall-clock timeout on analysis.
+    ///
+    /// Create with a `Duration`, then periodically call `check()` inside
+    /// long-running loops.  Returns `Err` if time is up.
+    pub struct SandboxGuard {
+        start: Instant,
+        timeout: Duration,
+        max_memory_bytes: usize,
+    }
+
+    impl SandboxGuard {
+        /// Create a new sandbox guard.
+        ///
+        /// * `timeout` – abort if analysis exceeds this wall-clock time.
+        /// * `max_memory_bytes` – advisory memory cap (checked on `check()`).
+        pub fn new(timeout: Duration, max_memory_bytes: usize) -> Self {
+            Self {
+                start: Instant::now(),
+                timeout,
+                max_memory_bytes,
+            }
+        }
+
+        /// Default guard: 120 s wall-clock, 2 GB memory.
+        pub fn default_limits() -> Self {
+            Self::new(Duration::from_secs(120), 2 * 1024 * 1024 * 1024)
+        }
+
+        /// Check whether the analysis has exceeded its resource budget.
+        pub fn check(&self) -> Result<(), SandboxError> {
+            if self.start.elapsed() > self.timeout {
+                return Err(SandboxError::Timeout {
+                    elapsed: self.start.elapsed(),
+                    limit: self.timeout,
+                });
+            }
+            // Best-effort resident-size check (Linux only).
+            #[cfg(target_os = "linux")]
+            {
+                if let Ok(status) = std::fs::read_to_string("/proc/self/status") {
+                    for line in status.lines() {
+                        if line.starts_with("VmRSS:") {
+                            let kb: usize = line.split_whitespace()
+                                .nth(1)
+                                .and_then(|s| s.parse().ok())
+                                .unwrap_or(0);
+                            if kb * 1024 > self.max_memory_bytes {
+                                return Err(SandboxError::MemoryExceeded {
+                                    used_bytes: kb * 1024,
+                                    limit_bytes: self.max_memory_bytes,
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+            Ok(())
+        }
+
+        /// Elapsed wall-clock time since guard creation.
+        pub fn elapsed(&self) -> Duration {
+            self.start.elapsed()
+        }
+    }
+
+    /// Sandbox errors.
+    #[derive(Debug)]
+    pub enum SandboxError {
+        Timeout { elapsed: Duration, limit: Duration },
+        MemoryExceeded { used_bytes: usize, limit_bytes: usize },
+    }
+
+    impl std::fmt::Display for SandboxError {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            match self {
+                Self::Timeout { elapsed, limit } => {
+                    write!(f, "Analysis timeout: {:.1}s exceeded {:.1}s limit",
+                           elapsed.as_secs_f64(), limit.as_secs_f64())
+                }
+                Self::MemoryExceeded { used_bytes, limit_bytes } => {
+                    write!(f, "Memory limit exceeded: {} MB used (limit: {} MB)",
+                           used_bytes / (1024 * 1024), limit_bytes / (1024 * 1024))
+                }
+            }
+        }
+    }
+
+    impl std::error::Error for SandboxError {}
 }
 
 /// Rate limiting for LLM API calls

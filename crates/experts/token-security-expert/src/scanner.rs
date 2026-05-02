@@ -154,7 +154,7 @@ impl TokenRiskScanner {
 
     /// Analyze a token from its on-chain data (pre-fetched) and optional source code
     ///
-    /// This is the **offline** entry point used by `shanon-cli` — no RPC calls,
+    /// This is the **offline** entry point used by `proktor-cli` — no RPC calls,
     /// just pure analysis of already-gathered data.
     pub fn analyze(
         &self,
